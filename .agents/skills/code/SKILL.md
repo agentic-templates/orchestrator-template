@@ -32,7 +32,11 @@ Write code that a reader understands the first time they read it. If a rule here
 
 ## Comment only what the code can't show
 
-A comment gives a reason, a hidden constraint or a surprise. Make the code clearer before you add one. For example: "Amounts are whole cents, because a fraction such as 0.10 can't be stored exactly, and the errors add up in a total."
+A comment gives a reason, a hidden constraint or a surprise, not what the code does or how it changed. Make the code clearer before you add one.
+
+- Not `# Convert the amount to cents`, above `cents = round(amount * 100)`
+- Not `# Fixed in #12: round half down`
+- But `# The bank's export rounds half down, so the totals match its statements only if this does too.`
 
 ## Fail with a clear error
 

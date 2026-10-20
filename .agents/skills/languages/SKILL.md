@@ -15,19 +15,7 @@ description: How to add a language, a tool or a dependency to the project, with 
    - rules against code that ignores an error, such as an empty `catch` block or a promise that nothing awaits
    - checks against blanket or unused suppression comments
    - a failure on a focused test, such as `test.only`
-4. Limit each function's cognitive complexity to 15, as Sonar counts it, so that the limit means the same in every language. If the language's linter can't count it, add the tool from this table to `scripts/check`:
-
-   | Language | Tool and setting |
-   |---|---|
-   | Python | `complexipy --max-complexity-allowed 15` |
-   | JavaScript, TypeScript | Biome's `noExcessiveCognitiveComplexity`, or ESLint's `sonarjs/cognitive-complexity` |
-   | Go | `gocognit -over 15` |
-   | Rust | Clippy's `cognitive_complexity`, with `cognitive-complexity-threshold = 15` |
-   | Java | PMD's `CognitiveComplexity` |
-   | Kotlin | detekt's `CognitiveComplexMethod` |
-   | C, C++ | clang-tidy's `readability-function-cognitive-complexity` |
-
-   For a language that no tool counts it for, limit the cyclomatic count to 10 with `lizard`.
+4. Count each function's cognitive complexity with a tool that follows Sonar's definition, such as the linter's own rule. Add it to `scripts/check` twice, with the same two limits as the Python entries there: in `TOOLS` to fail the check, and in `REVIEW_TOOLS` to show reviewers what to judge.
 5. For each setting you turned on, write a small example that breaks it, and see `scripts/check` fail. Delete the examples before you commit.
 6. Add the package manager to `.github/dependabot.yml`.
 7. Add the language's install, run and test commands to "Commands" in AGENTS.md.
