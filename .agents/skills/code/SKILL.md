@@ -35,7 +35,7 @@ Write code that a reader understands the first time they read it. If a rule here
 A comment gives what a later editor needs to know before they change the line: a reason, a hidden constraint or a surprise. It doesn't say what the code does or how it changed. Make the code clearer before you add one.
 
 - Not `# Wait one second`, above `time.sleep(1)`
-- Not `# Added in #12 to fix the import`
+- Not `# Now waits between requests instead of retrying`, above `time.sleep(1)`
 - But `# The bank's API rejects more than one request a second.`, above `time.sleep(1)`
 
 ## Fail with a clear error
