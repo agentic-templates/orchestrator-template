@@ -27,17 +27,18 @@ CLAUDE_WRITE_TO_READ = 31.0  # zzz's measurement on a Claude subscription
 PRICE_STEPS = {"claude-haiku": (100_000, 5.0)}
 
 HAND_OFF = (
-    "Hand off: a fresh builder would now cost less than continuing with this context. At your next stopping "
-    "point, once the reading you still need is done, push your branch, write .loop/handoff/issue-<number>.md as "
-    "the building skill describes, and end with your report."
+    "Hand off soon: your context has grown past the point where a fresh builder usually costs less. Keep going "
+    "until you reach a point where a successor wouldn't have to reread what you've loaded for the step you're on. "
+    "If the rest of your issue needs little more reading, finish it instead. Then push your branch, write "
+    ".loop/handoff/issue-<number>.md as the building skill describes, and end with your report."
 )
 HAND_OFF_NOW = (
     "Hand off now: your context is close to its limit. Do the hand-off as soon as the step you're on is done."
 )
 REFRESH = (
-    "Refresh: a fresh session would now cost less than continuing with this context. At your next stopping point, "
-    "once the reading you still need is done, rewrite .loop/state.md and run scripts/refresh as the last step of "
-    "your turn."
+    "Refresh soon: your context has grown past the point where a fresh session usually costs less. Keep going "
+    "until you reach a point where the next session wouldn't have to reread what you've loaded. Then rewrite "
+    ".loop/state.md and run scripts/refresh as the last step of your turn."
 )
 REFRESH_NOW = (
     "Refresh now: your context is close to its limit, and the agents are winding down. Rewrite .loop/state.md and "
