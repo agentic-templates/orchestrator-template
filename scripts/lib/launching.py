@@ -51,15 +51,10 @@ def make_worktree(agent_id: str, branch: str | None) -> Path:
 
 
 def settings() -> str:
-    """The project's settings for an agent: its hooks run from the main checkout, which holds the loop's state,
-    and the settings that only the orchestrator needs are left out."""
-    text = (ROOT / ".claude" / "settings.json").read_text().replace("${CLAUDE_PROJECT_DIR}", str(ROOT))
-    project = json.loads(text)
-    for key in ("agent", "statusLine"):
-        project.pop(key, None)
-    project["hooks"].pop("SessionStart", None)
-    project["hooks"].pop("UserPromptSubmit", None)
-    return json.dumps(project)
+    """The project's permissions, given again on the command line. A headless session loads the project's own
+    settings from its worktree, but ignores their allow rules in a folder its account hasn't trusted."""
+    project = json.loads((ROOT / ".claude" / "settings.json").read_text())
+    return json.dumps({"permissions": project["permissions"]})
 
 
 def start(account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str) -> Session:
@@ -72,7 +67,7 @@ def start(account: usage.Account, agent_type: str, agent_id: str, worktree: Path
     environment = usage.environment_for(account) | {"LOOP_AGENT_ID": agent_id, "DISABLE_AUTO_COMPACT": "1"}
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose", "--setting-sources", "user", "--settings", settings(), "--session-id", session_id,
+        "--verbose", "--settings", settings(), "--session-id", session_id,
         "--name", agent_id,
     ]  # fmt: skip
     process = subprocess.Popen(

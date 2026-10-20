@@ -8,9 +8,10 @@ clearing them. Only recent measurements count, so that a change on the provider'
 import json
 import statistics
 import time
-from pathlib import Path
 
-PATH = Path(__file__).resolve().parent.parent.parent / ".loop" / "measurements.jsonl"
+import usage
+
+PATH = usage.LOOP / "measurements.jsonl"
 MAX_AGE_SECONDS = 7 * 24 * 3600
 MAX_COUNT = 40
 
