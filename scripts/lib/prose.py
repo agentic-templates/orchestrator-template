@@ -44,33 +44,36 @@ LIST_MARKER = re.compile(r"^\s*([-*+]|\d+\.)\s+")
 def lines(text: str) -> list[Line]:
     """The lines of a Markdown text that hold words, without front matter, code and link targets."""
     text = HTML_COMMENT.sub(lambda match: "\n" * match.group().count("\n"), text)
+    return [classify(number, raw) for number, raw in text_lines(text)]
+
+
+def text_lines(text: str) -> list[tuple[int, str]]:
+    """The numbered lines that aren't empty, front matter or code."""
     result = []
-    in_code = False
-    in_front_matter = text.startswith("---\n")
+    skipping_until = "---" if text.startswith("---\n") else None
     for number, raw in enumerate(text.splitlines(), start=1):
         stripped = raw.strip()
-        if in_front_matter:
-            if number > 1 and stripped == "---":
-                in_front_matter = False
-            continue
-        if stripped.startswith("```"):
-            in_code = not in_code
-            continue
-        if in_code or not stripped:
-            continue
-        # Quoted text, such as an example of what not to write, isn't held to the rules.
-        cleaned = QUOTED.sub("quote", URL.sub("", LINK.sub(r"\1", INLINE_CODE.sub("code", raw))))
-        if stripped.startswith("|"):
-            kind = "table"
-        elif stripped.startswith("#"):
-            kind = "heading"
-        elif LIST_MARKER.match(raw):
-            kind = "list"
-            cleaned = LIST_MARKER.sub("", cleaned)
-        else:
-            kind = "prose"
-        result.append(Line(number, cleaned, kind))
+        if skipping_until is not None:
+            if stripped.startswith(skipping_until) and number > 1:
+                skipping_until = None
+        elif stripped.startswith("```"):
+            skipping_until = "```"
+        elif stripped:
+            result.append((number, raw))
     return result
+
+
+def classify(number: int, raw: str) -> Line:
+    # Quoted text, such as an example of what not to write, isn't held to the rules.
+    cleaned = QUOTED.sub("quote", URL.sub("", LINK.sub(r"\1", INLINE_CODE.sub("code", raw))))
+    stripped = raw.strip()
+    if stripped.startswith("|"):
+        return Line(number, cleaned, "table")
+    if stripped.startswith("#"):
+        return Line(number, cleaned, "heading")
+    if LIST_MARKER.match(raw):
+        return Line(number, LIST_MARKER.sub("", cleaned), "list")
+    return Line(number, cleaned, "prose")
 
 
 def check(text: str) -> list[Problem]:

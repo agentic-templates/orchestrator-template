@@ -1,0 +1,36 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A PostToolUse hook that turns on auto-merge for the pull request that `gh pr create` just opened.
+
+GitHub ignores auto-merge that a workflow turns on with its own token, so it has to come from the author's
+token. The merge then waits for the required checks, so nothing merges that fails them.
+"""
+
+import json
+import re
+import subprocess
+import sys
+
+PULL_REQUEST_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
+
+
+def main() -> None:
+    event = json.load(sys.stdin)
+    match = PULL_REQUEST_URL.search(json.dumps(event.get("tool_response", "")))
+    if not match or "--draft" in event.get("tool_input", {}).get("command", ""):
+        return
+    result = subprocess.run(
+        ["gh", "pr", "merge", "--auto", "--squash", match.group()], capture_output=True, text=True, check=False
+    )
+    message = (
+        f"Auto-merge is on for {match.group()}. GitHub merges it once its checks pass, so don't wait for them."
+        if result.returncode == 0
+        else f"Turning on auto-merge for {match.group()} failed: {result.stderr.strip()}"
+    )
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": message}}))
+
+
+if __name__ == "__main__":
+    main()
