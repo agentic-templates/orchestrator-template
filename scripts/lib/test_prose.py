@@ -27,6 +27,10 @@ class CheckTest(unittest.TestCase):
         text = '---\nname: x; y\n---\nWrite "it simply works" as `a; b`.\nIt takes 1–3 minutes.\n```\nx; y\n```\n'
         self.assertEqual(messages(text), [])
 
+    def test_lists_problems_in_line_order(self):
+        lines = [problem.line for problem in prose.check("It simply works.\nSee [here](https://example.com).\n")]
+        self.assertEqual(lines, [1, 2])
+
     def test_finds_vague_link_text(self):
         self.assertEqual(messages("See [here](https://example.com).\n"), ["Make the link text name the page it opens."])
 
