@@ -1,0 +1,72 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Lists the issues to build next, oldest first, each with the agent type that builds it.
+
+usage: scripts/next-issues
+
+It takes the issues of the oldest open milestone, and leaves out the ones that someone outside the project
+wrote, that wait for a decision, a triage or another issue, or that already have a branch named
+issue-<number>. Only one issue with the `loop` label is in progress at a time.
+"""
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import backlog
+import github
+
+BRANCH = re.compile(r"\bissue-(\d+)$")
+
+
+def branches_in_progress() -> set[int]:
+    local = subprocess.run(["git", "branch", "--list", "issue-*"], capture_output=True, text=True, check=True).stdout
+    remote = github.gh("api", f"repos/{github.repository()}/branches?per_page=100", "--jq", ".[].name")
+    names = [line.strip(" *+") for line in (local + "\n" + remote).splitlines()]
+    return {int(match.group(1)) for name in names if (match := BRANCH.search(name))}
+
+
+def main() -> int:
+    milestones = github.gh_json("api", f"repos/{github.repository()}/milestones?state=open&sort=created")
+    if not milestones:
+        print("No milestone is open. Plan the next goal as the planning skill describes.")
+        return 0
+    milestone = milestones[0]
+    listed = github.gh_json(
+        "issue",
+        "list",
+        "--milestone",
+        milestone["title"],
+        "--state",
+        "open",
+        "--limit",
+        "200",
+        "--json",
+        "number,title,labels,author",
+    )
+    issues = [
+        backlog.Issue(
+            number=item["number"],
+            title=item["title"],
+            labels=frozenset(label["name"] for label in item["labels"]),
+            author_is_maintainer=github.is_maintainer(item["author"]["login"]),
+            open_blockers=tuple(github.open_blockers(item["number"])),
+        )
+        for item in listed
+    ]
+    in_progress = branches_in_progress()
+    ready = backlog.ready(issues, in_progress)
+    print(f"Milestone: {milestone['title']}, {len(in_progress & {i.number for i in issues})} in progress")
+    for issue in ready:
+        print(f"#{issue.number}  {backlog.agent_type(issue):<13} {issue.title}")
+    if not ready:
+        print("Nothing is ready to build.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

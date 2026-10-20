@@ -1,0 +1,113 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Shows where the loop stands: its worktrees, open pull requests and the agents that scripts/launch started.
+
+usage: scripts/status [--save]
+
+With --save, it also commits and pushes the changes left in each worktree that no running agent uses, so
+that the work of an agent that stopped isn't lost, and removes the worktrees whose branch has merged.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import github
+
+ROOT = Path(__file__).resolve().parent.parent
+AGENTS = ROOT / ".loop" / "agents"
+
+
+def git(*args: str, cwd: Path = ROOT) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def running_agents() -> dict[str, dict]:
+    """The agents that scripts/launch started and that still run, by their worktree."""
+    agents = {}
+    for record in AGENTS.glob("*.json"):
+        agent = json.loads(record.read_text())
+        if is_running(agent["pid"]):
+            agents[agent["worktree"]] = agent
+    return agents
+
+
+def worktrees() -> list[dict]:
+    result, current = [], {}
+    for line in git("worktree", "list", "--porcelain").splitlines() + [""]:
+        if not line:
+            if current and Path(current["worktree"]) != ROOT:
+                result.append(current)
+            current = {}
+        else:
+            key, _, value = line.partition(" ")
+            current[key] = value
+    return result
+
+
+def merged_branches() -> set[str]:
+    merged = github.gh_json("pr", "list", "--state", "merged", "--limit", "100", "--json", "headRefName") or []
+    return {pr["headRefName"] for pr in merged}
+
+
+def tend_worktree(tree: dict, running: dict, merged: set[str], save: bool) -> str:
+    path = Path(tree["worktree"])
+    branch = tree.get("branch", "").removeprefix("refs/heads/")
+    changed = git("status", "--porcelain", cwd=path).splitlines()
+    if path.as_posix() in running:
+        return f"- {branch}: {running[path.as_posix()]['name']} is working in it"
+    if save and branch in merged and not changed:
+        git("worktree", "remove", path.as_posix())
+        return f"- {branch}: merged, so its worktree was removed"
+    if save and changed:
+        git("add", "--all", cwd=path)
+        git("commit", "--quiet", "--no-verify", "-m", "chore: save unfinished work", cwd=path)
+        git("push", "--quiet", "--set-upstream", "origin", branch, cwd=path)
+        return f"- {branch}: {len(changed)} changed files of an agent that stopped, saved and pushed"
+    return f"- {branch}: {len(changed)} changed files, no agent" if changed else f"- {branch}: no agent"
+
+
+def pull_requests() -> list[str]:
+    prs = github.gh_json(
+        "pr", "list", "--state", "open", "--json", "number,title,isDraft,autoMergeRequest,statusCheckRollup,reviews"
+    )
+    lines = []
+    for pr in prs or []:
+        states = {check.get("conclusion") or check.get("status") for check in pr["statusCheckRollup"]}
+        checks = "failing" if "FAILURE" in states else "passing" if states <= {"SUCCESS", "SKIPPED"} else "running"
+        merge = "draft" if pr["isDraft"] else "auto-merge on" if pr["autoMergeRequest"] else "auto-merge off"
+        lines.append(f"- #{pr['number']} {pr['title']}: checks {checks}, {merge}, {len(pr['reviews'])} reviews")
+    return lines
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--save", action="store_true", help="save the work of stopped agents, and remove merged worktrees"
+    )
+    arguments = parser.parse_args()
+    running = running_agents()
+    merged = merged_branches()
+    print("## Worktrees")
+    print("\n".join(tend_worktree(tree, running, merged, arguments.save) for tree in worktrees()) or "None")
+    print("\n## Open pull requests")
+    print("\n".join(pull_requests()) or "None")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

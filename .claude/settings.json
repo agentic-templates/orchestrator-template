@@ -1,5 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "agent": "orchestrator",
   "permissions": {
     "defaultMode": "auto",
     "allow": [
@@ -27,29 +28,57 @@
       "Bash(pkill *)",
       "Bash(killall *)",
       "Bash(gh auth token *)",
+      "Bash(gh issue create *)",
       "Bash(gh pr merge *)",
       "Bash(git config --global *)"
     ]
   },
   "sandbox": {
     "enabled": true,
-    "excludedCommands": ["gh *", "git push *", "git fetch *", "git pull *"],
+    "excludedCommands": [
+      "gh *",
+      "git push *",
+      "git fetch *",
+      "git pull *"
+    ],
     "filesystem": {
-      "allowWrite": ["~/.cache/uv", "~/.local/share/uv"]
+      "allowWrite": [
+        "~/.cache/uv",
+        "~/.local/share/uv"
+      ]
     },
     "network": {
-      "allowedDomains": ["github.com", "*.github.com", "*.githubusercontent.com", "pypi.org", "files.pythonhosted.org"]
+      "allowedDomains": [
+        "github.com",
+        "*.github.com",
+        "*.githubusercontent.com",
+        "pypi.org",
+        "files.pythonhosted.org"
+      ]
     },
     "credentials": {
       "files": [
-        { "path": ".env", "mode": "deny" },
-        { "path": "~/.ssh", "mode": "deny" },
-        { "path": "~/.aws", "mode": "deny" }
+        {
+          "path": ".env",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.ssh",
+          "mode": "deny"
+        },
+        {
+          "path": "~/.aws",
+          "mode": "deny"
+        }
       ]
     }
   },
-  "attribution": { "commit": "", "pr": "" },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "subagentPromptCacheTtl": "1h",
+  "idleCompaction": false,
   "env": {
     "BASH_DEFAULT_TIMEOUT_MS": "30000",
     "BASH_MAX_TIMEOUT_MS": "60000"
@@ -63,6 +92,20 @@
             "type": "command",
             "if": "Bash(gh pr create *)",
             "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/auto-merge"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/session-start skills claude"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/session-start state"
           }
         ]
       }

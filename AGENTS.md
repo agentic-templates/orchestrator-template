@@ -31,6 +31,7 @@ The skills in `.agents/skills/` hold the rules for each kind of work. Read a ski
 
 - `writing`: before you write anything that others read, including issues, pull requests, commit messages, comments and reports.
 - `code`: before you write or change code or tests.
+- `building`: before you build an issue into a pull request.
 - `reviewing`: before you review a pull request.
 - `planning`: before you turn goals into issues or decide what to build next.
 - `orchestrator`: before you run the loop.

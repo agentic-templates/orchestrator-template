@@ -1,0 +1,75 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Opens an issue, after it shows the issues that look like it.
+
+usage: scripts/new-issue --title <title> --body-file <file> [--label <label>]... [--milestone <title>] [--new]
+
+Without --new, it lists the open and closed issues whose titles share words with the new one, and stops if
+there are any. If none of them covers the change, run it again with --new. It checks the body's sections and prose first,
+and prints the new issue's link.
+"""
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import github
+import issues
+import prose
+
+SHORT_WORDS = re.compile(r"\b\w{1,3}\b")
+
+
+def similar_issues(title: str) -> list[dict]:
+    words = " ".join(word for word in SHORT_WORDS.sub(" ", title).split())
+    found = github.gh_json(
+        "issue",
+        "list",
+        "--state",
+        "all",
+        "--search",
+        f"{words} in:title",
+        "--limit",
+        "10",
+        "--json",
+        "number,title,state",
+    )
+    return found or []
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--body-file", required=True)
+    parser.add_argument("--label", action="append", default=[])
+    parser.add_argument("--milestone")
+    parser.add_argument("--new", action="store_true", help="open it even though similar issues exist")
+    arguments = parser.parse_args()
+    body = Path(arguments.body_file).read_text()
+    problems = issues.check_body(body) + [
+        f"Line {p.line}: {p.message}" for p in prose.check(body + "\n" + arguments.title)
+    ]
+    if problems:
+        print("\n".join(problems))
+        return 1
+    if not arguments.new and (similar := similar_issues(arguments.title)):
+        print("These issues look similar. If an open one covers the change, change its body instead.")
+        print("If a closed one asked for the same change, mention it in the new issue.")
+        print("\n".join(f"#{item['number']}  {item['state'].lower():<6}  {item['title']}" for item in similar))
+        print("If none of them covers it, run this again with --new.")
+        return 1
+    command = ["issue", "create", "--title", arguments.title, "--body-file", arguments.body_file]
+    for label in arguments.label:
+        command += ["--label", label]
+    if arguments.milestone:
+        command += ["--milestone", arguments.milestone]
+    print(github.gh(*command))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
