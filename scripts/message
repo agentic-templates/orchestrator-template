@@ -9,6 +9,7 @@ usage: scripts/message <agent ID> <message>
 scripts/status lists the running agents with their IDs.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -24,7 +25,11 @@ def main() -> int:
     agent_id, message = sys.argv[1], sys.argv[2]
     input_path = usage.AGENTS / f"{agent_id}.input"
     if not input_path.exists():
-        print(f"{agent_id} isn't running. scripts/status lists the agents that are.")
+        if (usage.AGENTS / f"{agent_id}.json").exists():
+            print(f"{agent_id} has stopped. To continue it from this message, run in the background:")
+            print(f"scripts/launch --resume {agent_id} --message {json.dumps(message)}")
+        else:
+            print(f"No agent is called {agent_id}. scripts/status lists the agents that run.")
         return 1
     launching.send(input_path, message)
     print(f"Sent to {agent_id}.")

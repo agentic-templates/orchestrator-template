@@ -23,7 +23,6 @@
       "Read(./.env.*)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
-      "Read(~/.config/gh/**)",
       "Bash(sudo *)",
       "Bash(pkill *)",
       "Bash(killall *)",

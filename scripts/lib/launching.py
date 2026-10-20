@@ -22,6 +22,7 @@ QUIET_SECONDS = 60
 @dataclass
 class Session:
     agent_id: str
+    session_id: str
     account: str
     worktree: Path
     process: subprocess.Popen
@@ -57,25 +58,29 @@ def settings() -> str:
     return json.dumps({"permissions": project["permissions"]})
 
 
-def start(account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str) -> Session:
-    session_id = str(uuid.uuid4())
+def start(
+    account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str, resume: str | None = None
+) -> Session:
+    """Starts the agent, or with `resume`, continues the session of that ID with its whole context."""
+    session_id = resume or str(uuid.uuid4())
     input_path = usage.AGENTS / f"{agent_id}.input"
     usage.AGENTS.mkdir(parents=True, exist_ok=True)
+    input_path.unlink(missing_ok=True)
     os.mkfifo(input_path)
     # Opened for reading and writing, so that the agent's input stays open between messages.
     input_fd = os.open(input_path, os.O_RDWR)
     environment = usage.environment_for(account) | {"LOOP_AGENT_ID": agent_id, "DISABLE_AUTO_COMPACT": "1"}
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose", "--settings", settings(), "--session-id", session_id,
-        "--name", agent_id,
+        "--verbose", "--settings", settings(), "--name", agent_id,
+        *(["--resume", session_id] if resume else ["--session-id", session_id]),
     ]  # fmt: skip
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
     home = Path(environment.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
     transcript = home / "projects" / str(worktree).replace("/", "-").replace(".", "-") / f"{session_id}.jsonl"
-    session = Session(agent_id, account.name, worktree, process, input_path, transcript)
+    session = Session(agent_id, session_id, account.name, worktree, process, input_path, transcript)
     send(input_path, prompt)
     return session
 

@@ -5,6 +5,7 @@
 """Starts an agent in a worktree of its own, waits until it's done, and prints its report.
 
 usage: scripts/launch <agent type> <issue or pull request> [--account <name>] [--second-review] [--successor]
+       scripts/launch --resume <agent ID> --message <message>
 
 Run it in the background: its exit wakes the orchestrator. The agent runs as a headless session of its own, so
 that the orchestrator's refreshes and crashes don't touch it, and scripts/message can still reach it while it
@@ -14,6 +15,8 @@ works. Without --account, it starts on the account that scripts/meter names.
   builder before it wrote, on the same branch.
 - A reviewer gets the pull request's number, and --second-review for its second review.
 - A researcher gets the research issue's number.
+- With --resume, an agent that has stopped continues its own session, with its whole context, from the message,
+  such as a builder given its review's errors.
 
 The agent is done once it has given its report, nothing has come from it for a minute, and it runs no command in
 the background. The launcher then stops it, commits and pushes any work left in its worktree, and prints its
@@ -21,6 +24,7 @@ report. Stopping the launcher does the same.
 """
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -47,14 +51,46 @@ def prompt_for(arguments: argparse.Namespace) -> str:
     return f"Build issue #{number}."
 
 
-def main() -> int:
+def parse() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("agent_type")
-    parser.add_argument("number", type=int)
+    parser.add_argument("agent_type", nargs="?")
+    parser.add_argument("number", type=int, nargs="?")
     parser.add_argument("--account")
     parser.add_argument("--second-review", action="store_true")
     parser.add_argument("--successor", action="store_true")
+    parser.add_argument("--resume", metavar="AGENT_ID")
+    parser.add_argument("--message")
     arguments = parser.parse_args()
+    if arguments.resume and not arguments.message:
+        parser.error("--resume needs --message, the message the agent continues from.")
+    if not arguments.resume and (arguments.agent_type is None or arguments.number is None):
+        parser.error("Give an agent type and an issue or pull request number, or --resume.")
+    return arguments
+
+
+def resume(arguments: argparse.Namespace) -> int:
+    record = json.loads((usage.AGENTS / f"{arguments.resume}.json").read_text())
+    account = next(a for a in usage.accounts() if a.name == record["account"])
+    worktree = Path(record["worktree"])
+    if not worktree.exists():
+        worktree = launching.make_worktree(record["id"], f"issue-{record['number']}")
+    session = launching.start(account, record["name"], record["id"], worktree, arguments.message, record["session"])
+    return run(session, {**record, "started": time.time(), "pid": os.getpid(), "worktree": str(worktree)})
+
+
+def run(session: launching.Session, record: dict) -> int:
+    record.pop("stopped", None)
+    record.pop("told_to_wind_down", None)
+    signal.signal(signal.SIGTERM, lambda *_: launching.finish(session, "stopped"))
+    usage.save_agent(record)
+    print(launching.wait(session, record))
+    return 0
+
+
+def main() -> int:
+    arguments = parse()
+    if arguments.resume:
+        return resume(arguments)
     name = arguments.account or metering.next_account(metering.decisions())
     account = next((a for a in usage.accounts() if a.name == name), None)
     if account is None:
@@ -64,21 +100,19 @@ def main() -> int:
     branch = f"issue-{arguments.number}" if arguments.successor else None
     worktree = launching.make_worktree(agent_id, branch)
     session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments))
-    signal.signal(signal.SIGTERM, lambda *_: launching.finish(session, "stopped"))
     record = {
         "id": agent_id,
         "name": arguments.agent_type,
         "config": usage.agent_config(arguments.agent_type),
         "account": account.name,
         "number": arguments.number,
+        "session": session.session_id,
         "started": time.time(),
         "pid": os.getpid(),
         "worktree": str(worktree),
         "transcript": str(session.transcript),
     }
-    usage.save_agent(record)
-    print(launching.wait(session, record))
-    return 0
+    return run(session, record)
 
 
 if __name__ == "__main__":
