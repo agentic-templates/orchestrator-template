@@ -26,9 +26,10 @@ import usage
 
 CHECK_SECONDS = 60
 WARM_WAKE_SECONDS = 50 * 60
-# A reading this old is replaced before the decision, more often for an account that agents are using.
+# A reading this old is replaced before the decision, more often for an account that agents are using. An idle
+# account's reading is replaced once it's too old for an agent to start on.
 STALE_BUSY_SECONDS = 5 * 60
-STALE_IDLE_SECONDS = 30 * 60
+STALE_IDLE_SECONDS = meter.STALE_MINUTES * 60
 # Percent of a window kept back on the orchestrator's account, so that it can still coordinate the other
 # accounts while its own fills up.
 ORCHESTRATOR_RESERVE = 5.0
