@@ -88,7 +88,7 @@ def check(text: str) -> list[Problem]:
             )
         for match in WORDS.finditer(line.text):
             problems.append(Problem(line.number, WORD_ADVICE[match.group(1).lower()]))
-    return problems
+    return sorted(problems, key=lambda problem: problem.line)
 
 
 def prose_words(text: str) -> int:
