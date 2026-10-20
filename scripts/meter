@@ -1,0 +1,139 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Says for each account whether to start agents on it, hold, or wind them down, and which account to use next.
+
+usage: scripts/meter [--watch]
+
+It reads each account's usage from .loop/usage/, and takes a fresh reading of an account whose last one is old.
+When agents must wind down, it tells the newest ones first, through a file in .loop/wind-down/ that the
+wind-down hook shows them. The orchestrator's account is used last, and keeps a reserve for the orchestrator.
+
+With --watch, it checks every minute and exits when an account's decision changes, which wakes the orchestrator.
+It also exits after 50 minutes, so that the orchestrator's prompt cache, which lasts an hour, stays warm.
+"""
+
+import argparse
+import json
+import statistics
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import meter
+import usage
+
+CHECK_SECONDS = 60
+WARM_WAKE_SECONDS = 50 * 60
+# A reading this old is replaced before the decision, more often for an account that agents are using.
+STALE_BUSY_SECONDS = 5 * 60
+STALE_IDLE_SECONDS = 30 * 60
+# The orchestrator keeps this many minutes of its own use back on its account.
+ORCHESTRATOR_BURN = 0.09
+ORCHESTRATOR_RESERVE_MINUTES = 60
+
+
+def reaction_minutes(agents: list[dict]) -> float:
+    """How long agents have taken to stop after a wind-down notice, or the default before any has."""
+    stops = [
+        (a["stopped"] - a["told_to_wind_down"]) / 60 for a in agents if "told_to_wind_down" in a and "stopped" in a
+    ]
+    return statistics.median(stops[-20:]) if stops else meter.DEFAULT_REACTION_MINUTES
+
+
+def all_agents() -> list[dict]:
+    return [json.loads(path.read_text()) for path in usage.AGENTS.glob("*.json")] if usage.AGENTS.exists() else []
+
+
+def refresh(account: usage.Account, running: int) -> None:
+    readings = [reading for window in usage.windows(account.name).values() for reading in window]
+    age = time.time() - max((reading.time for reading in readings), default=0)
+    if age > (STALE_BUSY_SECONDS if running else STALE_IDLE_SECONDS):
+        usage.probe(account)
+
+
+def tell_to_wind_down(agents: list[dict], count: int) -> None:
+    usage.WIND_DOWN.mkdir(parents=True, exist_ok=True)
+    for agent in [agent for agent in agents if "told_to_wind_down" not in agent][-count:] if count else []:
+        (usage.WIND_DOWN / agent["id"]).touch()
+        agent["told_to_wind_down"] = time.time()
+        usage.save_agent(agent)
+
+
+def clear_old_notices(running: list[dict]) -> None:
+    """Removes the wind-down files of agents that stopped, and the folder once it's empty, so that the
+    wind-down hook stops running."""
+    if not usage.WIND_DOWN.exists():
+        return
+    ids = {agent["id"] for agent in running}
+    for path in usage.WIND_DOWN.iterdir():
+        if path.name.removesuffix(".told") not in ids:
+            path.unlink()
+    if not any(usage.WIND_DOWN.iterdir()):
+        usage.WIND_DOWN.rmdir()
+
+
+def decisions() -> dict[str, meter.Decision]:
+    running = usage.running_agents()
+    clear_old_notices(running)
+    timing = (reaction_minutes(all_agents()), CHECK_SECONDS / 60)
+    orchestrator = usage.orchestrator_account()
+    result = {}
+    for account in usage.accounts():
+        on_account = [agent for agent in running if agent["account"] == account.name]
+        refresh(account, len(on_account))
+        reserve = ORCHESTRATOR_BURN * ORCHESTRATOR_RESERVE_MINUTES if account.name == orchestrator else 0.0
+        windows = usage.windows(account.name)
+        if not windows:
+            # Without any reading, the account's use is unknown, so nothing starts on it.
+            result[account.name] = meter.Decision("hold", 0, 0, float("nan"), 0.0)
+            continue
+        decision = meter.decide(windows, time.time(), len(on_account), timing, reserve)
+        tell_to_wind_down(on_account, decision.wind_down)
+        result[account.name] = decision
+    return result
+
+
+def next_account(result: dict[str, meter.Decision]) -> str | None:
+    """The account to start the next agent on: the least used one that has room, with the orchestrator's last."""
+    orchestrator = usage.orchestrator_account()
+    open_accounts = [name for name, decision in result.items() if decision.room]
+    return min(open_accounts, key=lambda name: (name == orchestrator, result[name].used), default=None)
+
+
+def report(result: dict[str, meter.Decision]) -> str:
+    lines = [
+        f"{name}: {d.action}"
+        + (f", room for {d.room} more" if d.room else "")
+        + (f", told {d.wind_down} to wind down" if d.wind_down else "")
+        + f" ({d.used:.0f}% used, {d.burn:.2f}% a minute)"
+        for name, d in result.items()
+    ]
+    chosen = next_account(result)
+    lines.append(f"Start the next agent on: {chosen}" if chosen else "Start no agent now.")
+    return "\n".join(lines)
+
+
+def watch() -> str:
+    started = time.time()
+    first = {name: d.action for name, d in decisions().items()}
+    while time.time() - started < WARM_WAKE_SECONDS:
+        time.sleep(CHECK_SECONDS)
+        result = decisions()
+        if {name: d.action for name, d in result.items()} != first:
+            return "An account's decision changed.\n" + report(result)
+    return "Warm wake: 50 minutes passed without a change.\n" + report(decisions())
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--watch", action="store_true", help="exit when a decision changes, or after 50 minutes")
+    arguments = parser.parse_args()
+    print(watch() if arguments.watch else report(decisions()))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
