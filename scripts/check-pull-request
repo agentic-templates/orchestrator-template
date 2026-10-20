@@ -1,0 +1,45 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Checks a pull request's title and description, which it reads from the variables TITLE and BODY.
+
+usage: TITLE=<title> [BODY=<description>] scripts/check-pull-request
+
+Without BODY, it checks only the title. It reads the labels of the issue that the description closes with `gh`. It prints each problem as an error
+for GitHub Actions, and its exit status is 1 when there is one.
+"""
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import prose
+import pull_request
+
+
+def is_research(issue: int) -> bool:
+    output = subprocess.run(
+        ["gh", "issue", "view", str(issue), "--json", "labels"], check=True, capture_output=True, text=True
+    ).stdout
+    return any(label["name"] == "research" for label in json.loads(output)["labels"])
+
+
+def main() -> int:
+    title = os.environ.get("TITLE", "")
+    body = os.environ.get("BODY")
+    problems = pull_request.check_title(title) + [problem.message for problem in prose.check(title)]
+    if body is not None:
+        issues = pull_request.closed_issues(body)
+        problems += pull_request.check_body(body, is_research=len(issues) == 1 and is_research(issues[0]))
+        problems += [f"Line {problem.line}: {problem.message}" for problem in prose.check(body)]
+    for problem in problems:
+        print(f"::error::{problem}")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

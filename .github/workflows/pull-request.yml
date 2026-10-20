@@ -1,0 +1,43 @@
+name: pull request
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  merge_group:
+
+permissions: {}
+
+jobs:
+  # The ruleset that scripts/configure-github sets requires a job named "pr". In the merge queue it skips,
+  # and GitHub counts the skip as a pass, because the pull request's own run checked its title and description.
+  pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+
+      # Dependabot's pull requests close no issue, so only their title is checked.
+      - name: Check the title
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/check-pull-request
+
+      - name: Check the title and the description
+        if: github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/check-pull-request

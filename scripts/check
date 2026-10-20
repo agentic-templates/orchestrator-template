@@ -1,0 +1,113 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Runs the checks on the files that the branch changes, or on every file with --all, as CI does.
+
+usage: scripts/check [--all] [--base <commit>]
+
+Without --base, the branch's changes are counted from where it left origin/main, together with
+uncommitted and untracked files. Each check prints "<file>:<line>: <what to do>". The exit status is 1
+when any check fails.
+
+To add a language, add its tools to TOOLS, as the `languages` skill describes.
+"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import files
+import prose
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# Each tool runs once, on the changed files of its kind, with the files appended to its command.
+TOOLS = [
+    ("python", ["uvx", "ruff@0.17.0", "check", "--quiet"]),
+    ("python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet"]),
+    ("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
+    ("workflow", ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]),
+    ("any", ["uvx", "typos@1.51.1"]),
+]
+# Each test command runs once when the branch changes a file of its kind.
+TESTS = [
+    (
+        "python",
+        ["uv", "run", "--no-project", "--python", "3.12", "python", "-m", "unittest", "discover", "-s", "scripts/lib"],
+    ),
+]
+
+
+def git(*args: str) -> list[str]:
+    output = subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    return [line for line in output.splitlines() if line]
+
+
+def changed_files(base: str | None) -> list[str]:
+    if base is None:
+        base = git("merge-base", "origin/main", "HEAD")[0]
+        local = git("diff", "--name-only", "--diff-filter=d", "HEAD") + git(
+            "ls-files", "--others", "--exclude-standard"
+        )
+    else:
+        local = []
+    return sorted(set(git("diff", "--name-only", "--diff-filter=d", base, "HEAD") + local))
+
+
+def kind(path: str) -> str:
+    if path.startswith(".github/workflows/") and path.endswith(".yml"):
+        return "workflow"
+    if path.endswith(".py"):
+        return "python"
+    with open(ROOT / path, "rb") as file:
+        first_line = file.readline()
+    return (
+        "python" if first_line.startswith(b"#!") and (b"python" in first_line or b"uv run" in first_line) else "other"
+    )
+
+
+def check_files(paths: list[str]) -> list[str]:
+    problems = []
+    for path in paths:
+        try:
+            text = (ROOT / path).read_text()
+        except UnicodeDecodeError:
+            continue
+        found = files.check_name(path) + files.check_text(path, text)
+        if path.endswith(".md"):
+            found += prose.check(text)
+        problems += [f"{path}:{problem.line}: {problem.message}" for problem in found]
+    return problems
+
+
+def run_tools(paths: list[str]) -> bool:
+    kinds = {path: kind(path) for path in paths}
+    passed = True
+    for wanted, command in TOOLS:
+        targets = [path for path in paths if wanted in ("any", kinds[path])]
+        if targets and subprocess.run([*command, *targets], check=False, cwd=ROOT).returncode != 0:
+            passed = False
+    for wanted, command in TESTS:
+        if wanted in kinds.values() and subprocess.run(command, check=False, cwd=ROOT).returncode != 0:
+            passed = False
+    return passed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--all", action="store_true", help="check every file, as CI does in the merge queue")
+    parser.add_argument("--base", help="count the changes from this commit")
+    arguments = parser.parse_args()
+    paths = git("ls-files") if arguments.all else changed_files(arguments.base)
+    paths = [path for path in paths if (ROOT / path).is_file() and not (ROOT / path).is_symlink()]
+    problems = check_files(paths)
+    print("\n".join(problems), end="\n" if problems else "", flush=True)
+    tools_passed = run_tools(paths)
+    return 0 if tools_passed and not problems else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,195 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Applies this repository's settings on GitHub, which GitHub doesn't copy from a template.
+
+usage: scripts/configure-github
+
+Run it once after you create a repository from the template. Running it again resets every setting below,
+and deletes each label that it doesn't list. It needs admin access to the repository.
+"""
+
+import json
+import subprocess
+import sys
+
+LABELS = {
+    "bug": ("d73a4a", "Something is broken, such as a crash, a wrong result or docs that don't match the product"),
+    "feature": ("a2eeef", "A change to what users can do or read, other than a fix"),
+    "maintenance": ("c5def5", "Work that leaves what users can do unchanged, such as refactoring or tests"),
+    "research": ("d4c5f9", "A question to answer before anyone builds. Ends in a comment"),
+    "small": ("e6e6e6", "A change of a few lines, built by the small builder"),
+    "deep": ("5319e7", "Work that needs more thought than most, built by the deep builder"),
+    "loop": ("0e8a16", "A change to how the loop works, such as its skills, agents, hooks or checks"),
+    "needs-decision": ("d876e3", "Waiting for the maintainer to answer the question in the issue"),
+    "needs-triage": ("fbca04", "Opened by someone outside the project, and not judged yet"),
+    "dependencies": ("0366d6", "Dependabot's version updates"),
+}
+
+# GitHub Actions' app ID, so that only a workflow can report the required checks.
+ACTIONS_APP = 15368
+# Every change arrives through a pull request that passes the checks and code scanning, and the merge queue
+# tests it together with the latest main. Nobody reviews the merge, so CodeQL is the only security reviewer.
+RULESET = {
+    "name": "main",
+    "target": "branch",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+    "rules": [
+        {"type": "deletion"},
+        {"type": "non_fast_forward"},
+        {
+            "type": "pull_request",
+            "parameters": {
+                "required_approving_review_count": 0,
+                "dismiss_stale_reviews_on_push": False,
+                "require_code_owner_review": False,
+                "require_last_push_approval": False,
+                "required_review_thread_resolution": False,
+                "require_extra_approval_for_unattributed_changes": False,
+                "allowed_merge_methods": ["squash"],
+            },
+        },
+        {
+            "type": "required_status_checks",
+            "parameters": {
+                "strict_required_status_checks_policy": False,
+                "required_status_checks": [
+                    {"context": "check", "integration_id": ACTIONS_APP},
+                    {"context": "pr", "integration_id": ACTIONS_APP},
+                ],
+            },
+        },
+        {
+            "type": "code_scanning",
+            "parameters": {
+                "code_scanning_tools": [
+                    {"tool": "CodeQL", "security_alerts_threshold": "high_or_higher", "alerts_threshold": "errors"}
+                ]
+            },
+        },
+        {
+            "type": "merge_queue",
+            "parameters": {
+                "merge_method": "SQUASH",
+                "grouping_strategy": "ALLGREEN",
+                "max_entries_to_build": 5,
+                "min_entries_to_merge": 1,
+                "max_entries_to_merge": 5,
+                "min_entries_to_merge_wait_minutes": 0,
+                "check_response_timeout_minutes": 15,
+            },
+        },
+    ],
+}
+
+
+def gh(*args: str, input_json: object = None) -> str:
+    result = subprocess.run(
+        ["gh", *args],
+        input=None if input_json is None else json.dumps(input_json),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        sys.exit(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def api(method: str, path: str, body: object = None) -> str:
+    return gh("api", "--method", method, path, *(["--input", "-"] if body is not None else []), input_json=body)
+
+
+def check_repository(repo: str) -> None:
+    info = json.loads(gh("repo", "view", repo, "--json", "viewerPermission,visibility"))
+    if info["viewerPermission"] != "ADMIN":
+        sys.exit(f"Changing the settings of {repo} needs admin access. Ask an admin of {repo} to run this script.")
+    if info["visibility"] != "PUBLIC":
+        sys.exit(f"{repo} isn't public, and GitHub's merge queue needs a public repository on a free plan.")
+    if json.loads(api("GET", f"repos/{repo}"))["owner"]["type"] != "Organization":
+        sys.exit(f"{repo} belongs to a personal account, and only an organization's repositories have a merge queue.")
+
+
+def configure_merging(repo: str) -> None:
+    print("Merging: squash only, with the pull request's title as the commit subject, and auto-merge allowed")
+    settings = {
+        "allow_squash_merge": True,
+        "allow_merge_commit": False,
+        "allow_rebase_merge": False,
+        "squash_merge_commit_title": "PR_TITLE",
+        "squash_merge_commit_message": "BLANK",
+        "delete_branch_on_merge": True,
+        "allow_auto_merge": True,
+        "has_wiki": False,
+    }
+    api("PATCH", f"repos/{repo}", settings)
+
+
+def configure_security(repo: str) -> None:
+    print("Security: Dependabot alerts and fixes, private vulnerability reports, secret scanning and CodeQL")
+    api("PUT", f"repos/{repo}/vulnerability-alerts")
+    api("PUT", f"repos/{repo}/automated-security-fixes")
+    api("PUT", f"repos/{repo}/private-vulnerability-reporting")
+    scanning = {"secret_scanning": {"status": "enabled"}, "secret_scanning_push_protection": {"status": "enabled"}}
+    api("PATCH", f"repos/{repo}", {"security_and_analysis": scanning})
+    if json.loads(api("GET", f"repos/{repo}/code-scanning/default-setup"))["state"] != "configured":
+        api("PATCH", f"repos/{repo}/code-scanning/default-setup", {"state": "configured"})
+    print("Releases: a published release can't be changed, and only release tags can use the release environment")
+    api("PUT", f"repos/{repo}/immutable-releases")
+    api(
+        "PUT",
+        f"repos/{repo}/environments/release",
+        {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}},
+    )
+    policies = json.loads(api("GET", f"repos/{repo}/environments/release/deployment-branch-policies"))
+    if not any(policy["name"] == "v*" and policy["type"] == "tag" for policy in policies["branch_policies"]):
+        api("POST", f"repos/{repo}/environments/release/deployment-branch-policies", {"name": "v*", "type": "tag"})
+    print("Actions: a read-only token by default, and every action pinned to a commit")
+    api(
+        "PUT",
+        f"repos/{repo}/actions/permissions/workflow",
+        {"default_workflow_permissions": "read", "can_approve_pull_request_reviews": False},
+    )
+    api(
+        "PUT",
+        f"repos/{repo}/actions/permissions",
+        {"enabled": True, "allowed_actions": "all", "sha_pinning_required": True},
+    )
+
+
+def configure_labels(repo: str) -> None:
+    print("Labels: the set that the planning skill describes")
+    for name, (color, description) in LABELS.items():
+        gh("label", "create", name, "--repo", repo, "--force", "--color", color, "--description", description)
+    current = json.loads(gh("label", "list", "--repo", repo, "--limit", "200", "--json", "name"))
+    for label in current:
+        if label["name"] not in LABELS:
+            gh("label", "delete", label["name"], "--repo", repo, "--yes")
+
+
+def configure_main(repo: str) -> None:
+    print("Main: changes arrive through pull requests that pass the checks, and merge through the merge queue")
+    rulesets = json.loads(api("GET", f"repos/{repo}/rulesets?includes_parents=false"))
+    existing = [ruleset["id"] for ruleset in rulesets if ruleset["name"] == RULESET["name"]]
+    if existing:
+        api("PUT", f"repos/{repo}/rulesets/{existing[0]}", RULESET)
+    else:
+        api("POST", f"repos/{repo}/rulesets", RULESET)
+
+
+def main() -> None:
+    repo = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
+    check_repository(repo)
+    configure_merging(repo)
+    configure_security(repo)
+    configure_labels(repo)
+    configure_main(repo)
+    print(f"Turn on Dependabot malware alerts at https://github.com/{repo}/settings/security_analysis yourself,")
+    print("because GitHub gives scripts no way to turn them on.")
+
+
+if __name__ == "__main__":
+    main()

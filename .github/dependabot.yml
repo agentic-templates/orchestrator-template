@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Give every package manager you add the cooldown, groups, commit-message and labels settings below.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # A week's wait gives time for a bad or compromised release to be found and pulled.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build
+      include: scope
+    labels: [dependencies]

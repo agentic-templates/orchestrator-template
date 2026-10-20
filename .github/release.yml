@@ -1,0 +1,5 @@
+# Release notes list the merged pull requests by title, without Dependabot's version updates.
+changelog:
+  exclude:
+    authors:
+      - dependabot[bot]
