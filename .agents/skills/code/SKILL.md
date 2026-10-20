@@ -32,11 +32,11 @@ Write code that a reader understands the first time they read it. If a rule here
 
 ## Comment only what the code can't show
 
-A comment gives a reason, a hidden constraint or a surprise, not what the code does or how it changed. Make the code clearer before you add one.
+A comment gives what a later editor needs to know before they change the line: a reason, a hidden constraint or a surprise. It doesn't say what the code does or how it changed. Make the code clearer before you add one.
 
-- Not `# Convert the amount to cents`, above `cents = round(amount * 100)`
-- Not `# Fixed in #12: round half down`
-- But `# The bank's export rounds half down, so the totals match its statements only if this does too.`
+- Not `# Wait one second`, above `time.sleep(1)`
+- Not `# Added in #12 to fix the import`
+- But `# The bank's API rejects more than one request a second.`, above `time.sleep(1)`
 
 ## Fail with a clear error
 
