@@ -17,6 +17,14 @@ description: How to review a pull request or a plan. Read it before you review o
 
 Post the review with `gh pr review <number> --comment --body-file <file>`, with the file written outside the repository.
 
+## Review as the reviewer agent
+
+The orchestrator gives you a pull request's number, and says whether it's a first or a second review.
+
+1. Read the pull request and its issue with `gh pr view <number> --comments`, `gh pr diff <number>` and `gh issue view <issue>`.
+2. Review it as "Review a pull request" describes, and post the review.
+3. End with a one-line report: "no errors", or the number of errors you posted.
+
 ## Review a plan
 
 Check that each issue meets "Definition of ready" in the `planning` skill, that the blocked-by links match the order the changes need, and that no two issues that can run at once change the same code. Report only what must change, as for a pull request.

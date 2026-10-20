@@ -1,0 +1,52 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A SessionStart hook that gives the orchestrator its skills, its saved state and the loop's status.
+
+usage: scripts/hooks/session-start skills <provider>
+       scripts/hooks/session-start state
+
+It runs at startup, on resume, after /clear and after compaction. It does nothing in a session of another
+agent type, such as a builder that scripts/launch started. A hook can inject at most 10,000 characters, so
+the skills and the state come from two separate hooks.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+STATE = ROOT / ".loop" / "state.md"
+MAX_CHARACTERS = 10_000
+
+
+def skill(name: str) -> str:
+    text = (ROOT / ".agents" / "skills" / name / "SKILL.md").read_text()
+    return text.split("---", 2)[2].strip() if text.startswith("---") else text
+
+
+def state() -> str:
+    saved = STATE.read_text().strip() if STATE.exists() else "No saved state. This is the loop's first session."
+    status = subprocess.run(
+        [str(ROOT / "scripts" / "status"), "--save"], capture_output=True, text=True, check=False, cwd=ROOT
+    )
+    return f"# Your saved state (.loop/state.md)\n\n{saved}\n\n# The loop's status\n\n{status.stdout or status.stderr}"
+
+
+def main() -> None:
+    event = json.load(sys.stdin)
+    if event.get("agent_type") not in (None, "orchestrator"):
+        return
+    if sys.argv[1] == "skills":
+        context = skill("orchestrator") + "\n\n" + skill(f"orchestrator-{sys.argv[2]}")
+    else:
+        context = state()
+    if len(context) > MAX_CHARACTERS:
+        context = context[: MAX_CHARACTERS - 100] + "\n\n[Cut here. Run scripts/status for the rest.]"
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}))
+
+
+if __name__ == "__main__":
+    main()
