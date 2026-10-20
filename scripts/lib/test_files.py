@@ -18,6 +18,13 @@ class CheckTextTest(unittest.TestCase):
     def test_finds_unfinished_work(self):
         self.assertEqual(len(messages("a.py", "x = 1  # TO" + "DO: round the total\n")), 1)
 
+    def test_needs_a_reason_for_each_suppression(self):
+        noqa = "# no" + "qa: complexipy"
+        self.assertEqual(len(messages("a.py", f"def f():  {noqa}\n")), 1)
+        self.assertEqual(messages("a.py", f"def f():  {noqa}, because each branch reads one field\n"), [])
+        self.assertEqual(messages("a.rs", "// Allowed because the parser needs every case.\n#[allow(clippy::x)]\n"), [])
+        self.assertEqual(len(messages("a.ts", "// eslint-" + "disable-next-line no-console\n")), 1)
+
     def test_limits_the_size_of_skills_only(self):
         text = "word " * 2_500
         self.assertEqual(len(messages(".agents/skills/code/SKILL.md", text)), 1)

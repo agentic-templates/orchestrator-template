@@ -2,12 +2,9 @@ line-length = 120
 target-version = "py312"
 
 [lint]
-# Beyond the defaults: complexity limits, rules against hidden errors, unused or blanket suppressions,
-# and commented-out code, as the `languages` skill asks for.
-extend-select = ["B", "BLE", "C901", "ERA", "I", "PGH004", "PLR0913", "PLR0915", "RUF100", "S110", "SIM", "UP"]
-
-[lint.mccabe]
-max-complexity = 10
+# Beyond the defaults: limits on arguments and statements, rules against hidden errors, unused or blanket
+# suppressions, and commented-out code, as the `languages` skill asks for. complexipy counts cognitive complexity.
+extend-select = ["B", "BLE", "ERA", "I", "PGH004", "PLR0913", "PLR0915", "RUF100", "S110", "SIM", "UP"]
 
 [lint.pylint]
 max-args = 6

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "auto",
+    "allow": [
+      "Bash(git push *)",
+      "Bash(git worktree *)",
+      "Bash(gh issue close *)",
+      "Bash(gh issue comment *)",
+      "Bash(gh issue edit *)",
+      "Bash(gh pr close *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr edit *)",
+      "Bash(gh pr review *)",
+      "Bash(scripts/*)",
+      "Bash(uv *)",
+      "Bash(uvx *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.config/gh/**)",
+      "Bash(sudo *)",
+      "Bash(pkill *)",
+      "Bash(killall *)",
+      "Bash(gh auth token *)",
+      "Bash(gh pr merge *)",
+      "Bash(git config --global *)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "excludedCommands": ["gh *", "git push *", "git fetch *", "git pull *"],
+    "filesystem": {
+      "allowWrite": ["~/.cache/uv", "~/.local/share/uv"]
+    },
+    "network": {
+      "allowedDomains": ["github.com", "*.github.com", "*.githubusercontent.com", "pypi.org", "files.pythonhosted.org"]
+    },
+    "credentials": {
+      "files": [
+        { "path": ".env", "mode": "deny" },
+        { "path": "~/.ssh", "mode": "deny" },
+        { "path": "~/.aws", "mode": "deny" }
+      ]
+    }
+  },
+  "attribution": { "commit": "", "pr": "" },
+  "subagentPromptCacheTtl": "1h",
+  "env": {
+    "BASH_DEFAULT_TIMEOUT_MS": "30000",
+    "BASH_MAX_TIMEOUT_MS": "60000"
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(gh pr create *)",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/auto-merge"
+          }
+        ]
+      }
+    ]
+  }
+}
