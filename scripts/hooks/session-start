@@ -13,11 +13,16 @@ the skills and the state come from two separate hooks.
 """
 
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+import usage
+
 STATE = ROOT / ".loop" / "state.md"
 MAX_CHARACTERS = 10_000
 
@@ -25,6 +30,17 @@ MAX_CHARACTERS = 10_000
 def skill(name: str) -> str:
     text = (ROOT / ".agents" / "skills" / name / "SKILL.md").read_text()
     return text.split("---", 2)[2].strip() if text.startswith("---") else text
+
+
+def take_over(provider: str) -> None:
+    """Records the orchestrator's account, and marks the subagents of an earlier session as stopped,
+    because they ran in its process."""
+    usage.LOOP.mkdir(exist_ok=True)
+    usage.ORCHESTRATOR.write_text(json.dumps({"account": usage.account_of(dict(os.environ), provider)}))
+    for agent in usage.running_agents():
+        if "pid" not in agent:
+            agent["stopped"] = time.time()
+            usage.save_agent(agent)
 
 
 def state() -> str:
@@ -40,6 +56,7 @@ def main() -> None:
     if event.get("agent_type") not in (None, "orchestrator"):
         return
     if sys.argv[1] == "skills":
+        take_over(sys.argv[2])
         context = skill("orchestrator") + "\n\n" + skill(f"orchestrator-{sys.argv[2]}")
     else:
         context = state()

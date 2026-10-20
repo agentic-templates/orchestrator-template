@@ -1,0 +1,26 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Claude Code's status line. It saves the account's usage for scripts/meter, and shows it."""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import usage
+
+
+def main() -> None:
+    status = json.load(sys.stdin)
+    account = usage.account_of(dict(os.environ))
+    usage.record_status_line(account, status)
+    limits = status.get("rate_limits") or {}
+    parts = [f"{name.replace('_', ' ')} {values['used_percentage']:.0f}%" for name, values in limits.items() if values]
+    print(" · ".join(parts) or "no usage reading yet")
+
+
+if __name__ == "__main__":
+    main()
