@@ -52,6 +52,15 @@ An error message says what failed and what the reader can do about it.
 - Not "Invalid file."
 - But "bank.csv has 60,000 rows, and the limit is 50,000. Split it into two files and try again."
 
+## Write pages
+
+- Headings name what the reader does or learns, in words they would search for. Write "Install on macOS", not "Getting started".
+- Use numbered steps for a procedure, bullets for items of the same kind, and prose for reasoning.
+- Put each command the reader runs in a code block they can copy.
+- Make link text name the page it opens.
+- Update a page in place when something changes. Don't add notes such as "Updated in May".
+- A README opens with what the reader can do with the project, then covers setup and one example from start to finish. Its limits come after the example.
+
 ## Write issues
 
 - Write an issue in a few sentences that state its result, such as what to build or the question to answer. Link to details elsewhere instead of repeating them.

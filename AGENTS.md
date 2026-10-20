@@ -34,6 +34,7 @@ The skills in `.agents/skills/` hold the rules for each kind of work. Read a ski
 - `reviewing`: before you review a pull request.
 - `planning`: before you turn goals into issues or decide what to build next.
 - `orchestrator`: before you run the loop.
+- `rules`: before you change AGENTS.md, a skill, an agent type, a hook, a setting or a check.
 - `languages`: before you add a language, a tool or a dependency.
 - `releasing`: before you publish a release or handle a security report.
 
