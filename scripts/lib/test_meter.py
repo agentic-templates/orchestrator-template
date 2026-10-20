@@ -32,6 +32,7 @@ class Simulation:
     readings: list[Reading] = field(default_factory=list)
     peak: float = 0.0
     wind_downs: int = 0
+    last_start: float = -1.0
 
     def run(self, minutes: int = WINDOW, burn_change: tuple[int, float] | None = None) -> "Simulation":
         for minute in range(minutes):
@@ -42,7 +43,9 @@ class Simulation:
                 self.agent_burn *= burn_change[1]
             self.read(minute, now)
             running = [agent for agent in self.agents if agent.stops_in is None]
-            self.act(meter.decide({"5h": self.readings}, now, meter.Load(len(running), REACTION, 1.0)))
+            measured = not self.readings or self.readings[-1].time > self.last_start
+            load = meter.Load(len(running), REACTION, 1.0, measured_since_last_start=measured)
+            self.act(meter.decide({"5h": self.readings}, now, load), now)
             self.work()
         return self
 
@@ -51,11 +54,12 @@ class Simulation:
         if fresh and minute % self.reading_every == 0:
             self.readings.append(Reading(now, math.floor(self.used), WINDOW * MINUTE))
 
-    def act(self, decision: meter.Decision) -> None:
+    def act(self, decision: meter.Decision, now: float) -> None:
         if decision.action == "start":
             for _ in range(min(decision.room, self.issues, self.max_agents - len(self.agents))):
                 self.agents.append(Agent(self.agent_burn, self.issue_minutes))
                 self.issues -= 1
+                self.last_start = now
         running = [agent for agent in self.agents if agent.stops_in is None]
         for agent in running[len(running) - decision.wind_down :] if decision.wind_down else []:
             agent.stops_in = REACTION
@@ -114,11 +118,16 @@ class DecideTest(unittest.TestCase):
             meter.decide({"5h": five_hour, "7d": weekly}, 600, meter.Load(2, REACTION, 1.0)).action, "wind down"
         )
 
-    def test_counts_room_by_the_burn_of_the_agent_about_to_start(self):
-        readings = [Reading(0, 50, 10_000), Reading(600, 51, 10_000)]
-        cheap = meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0, new_agent_burn=0.01))
-        costly = meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0, new_agent_burn=10.0))
-        self.assertEqual((cheap.action, costly.action), ("start", "hold"))
+    def test_starts_no_more_agents_until_a_reading_shows_what_the_last_ones_use(self):
+        readings = [Reading(0, 10, 10_000), Reading(600, 11, 10_000)]
+        waiting = meter.Load(2, REACTION, 1.0, measured_since_last_start=False)
+        self.assertEqual(meter.decide({"5h": readings}, 600, waiting).action, "hold")
+        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0)).action, "start")
+
+    def test_starts_no_agent_that_would_have_to_stop_soon(self):
+        # At 0.5% a minute, the account reaches its stop point in about 14 minutes, too soon for a new agent.
+        readings = [Reading(0, 86, 10_000), Reading(600, 91, 10_000)]
+        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0)).action, "hold")
 
     def test_a_reserve_holds_the_account_back_earlier(self):
         readings = [Reading(0, 80, 10_000), Reading(600, 82, 10_000)]

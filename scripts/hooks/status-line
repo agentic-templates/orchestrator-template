@@ -17,9 +17,6 @@ def main() -> None:
     status = json.load(sys.stdin)
     account = usage.account_of(dict(os.environ))
     usage.record_status_line(account, status)
-    model = (status.get("model") or {}).get("id")
-    if model and usage.orchestrator().get("account") == account and usage.orchestrator().get("model") != model:
-        usage.ORCHESTRATOR.write_text(json.dumps({**usage.orchestrator(), "model": model}))
     limits = status.get("rate_limits") or {}
     parts = [f"{name.replace('_', ' ')} {values['used_percentage']:.0f}%" for name, values in limits.items() if values]
     print(" · ".join(parts) or "no usage reading yet")

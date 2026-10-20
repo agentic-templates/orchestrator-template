@@ -13,6 +13,11 @@ FLOOR = 2.0
 DEFAULT_REACTION_MINUTES = 8.0
 # Percent of a window per minute that one agent uses, until the account's own readings show it.
 DEFAULT_AGENT_BURN = 0.1
+# An agent starts only if it could run this long before the account would have to stop it, so that the cost of
+# starting it, which writes its whole context to the cache, buys real work.
+MIN_RUN_MINUTES = 30.0
+# No agent starts on a reading older than this, because the account may have moved since.
+STALE_MINUTES = 10.0
 # The burn rate is the larger of the rates over these spans of recent readings, so that a rise shows quickly
 # and a fall only once it lasts.
 BURN_SPANS_MINUTES = (5.0, 20.0)
@@ -37,9 +42,12 @@ class Decision:
 ORDER = ("start", "hold", "wind down", "pause")
 
 
-def burn_rate(readings: list[Reading], now: float) -> float | None:
-    """The window's use per minute in its current period, if the recent readings show it."""
-    rates = [rate for span in BURN_SPANS_MINUTES if (rate := rate_over(readings, now, span)) is not None]
+def burn_rate(readings: list[Reading]) -> float | None:
+    """The window's use per minute up to its latest reading, if the readings before it show one. It's measured
+    up to the latest reading, not up to now, so that a gap in the readings doesn't hide the burn."""
+    if not readings:
+        return None
+    rates = [rate for span in BURN_SPANS_MINUTES if (rate := rate_over(readings, readings[-1].time, span)) is not None]
     return max(rates) if rates else None
 
 
@@ -60,7 +68,7 @@ class Load:
     reaction: float  # minutes an agent takes to stop after a notice
     interval: float  # minutes until the next decision
     reserve: float = 0.0  # percent kept back, such as for the orchestrator
-    new_agent_burn: float | None = None  # what the next agent is expected to use, if known for its model
+    measured_since_last_start: bool = True  # whether a reading shows what the agents started last use
 
 
 def decide_window(readings: list[Reading], now: float, load: Load) -> Decision:
@@ -71,7 +79,7 @@ def decide_window(readings: list[Reading], now: float, load: Load) -> Decision:
     """
     latest = readings[-1] if readings else None
     fresh_window = latest is None or latest.resets_at <= now
-    measured = None if fresh_window else burn_rate(readings, now)
+    measured = None if fresh_window else burn_rate(readings)
     burn = measured if measured is not None else DEFAULT_AGENT_BURN * load.agents
     per_agent = burn / load.agents if load.agents and burn > 0 else DEFAULT_AGENT_BURN
     # A reading that isn't fresh is projected forward, so that missing data slows the loop down instead of hiding.
@@ -83,10 +91,12 @@ def decide_window(readings: list[Reading], now: float, load: Load) -> Decision:
     keep = math.floor(spare / (per_agent * load.interval))
     if keep < load.agents:
         return Decision("wind down", 0, load.agents - keep, used, burn)
-    # Each new agent must be able to run until the next decision and still stop in time. Starts at most double
-    # the agents, so that the burn is measured before more start.
-    horizon = load.reaction + load.interval
-    allowed = math.floor((limit - used - burn * horizon) / ((load.new_agent_burn or per_agent) * horizon))
+    # More agents start only once a reading shows what the last ones use, and at most as many as already run.
+    stale = not fresh_window and now - latest.time > STALE_MINUTES * 60
+    if stale or not load.measured_since_last_start:
+        return Decision("hold", 0, 0, used, burn)
+    horizon = MIN_RUN_MINUTES + load.reaction
+    allowed = math.floor((limit - used - burn * horizon) / (per_agent * horizon))
     room = max(0, min(allowed, max(2, load.agents)))
     return Decision("start" if room else "hold", room, 0, used, burn)
 

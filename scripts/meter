@@ -4,11 +4,10 @@
 # ///
 """Says for each account whether to start agents on it, hold, or wind them down, and which account to use next.
 
-usage: scripts/meter [--for <agent type>] [--watch]
+usage: scripts/meter [--watch]
 
 It reads each account's usage from .loop/usage/, and takes a fresh reading of an account whose last one is old.
-With --for, it counts the room on each account by what an agent of that type has used before. When agents must
-wind down, it tells the newest ones first, through a file in .loop/wind-down/ that the
+When agents must wind down, it tells the newest ones first, through a file in .loop/wind-down/ that the
 wind-down hook shows them. The orchestrator's account is used last, and keeps a reserve for the orchestrator.
 
 With --watch, it checks every minute and exits when an account's decision changes, which wakes the orchestrator.
@@ -16,7 +15,6 @@ It also exits after 50 minutes, so that the orchestrator's prompt cache, which l
 """
 
 import argparse
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -31,10 +29,9 @@ WARM_WAKE_SECONDS = 50 * 60
 # A reading this old is replaced before the decision, more often for an account that agents are using.
 STALE_BUSY_SECONDS = 5 * 60
 STALE_IDLE_SECONDS = 30 * 60
-# The orchestrator keeps this many minutes of its own use back on its account. Until its own use is measured,
-# it counts as what the orchestrator used in an earlier project, in percent of a window per minute.
-ORCHESTRATOR_RESERVE_MINUTES = 60
-DEFAULT_ORCHESTRATOR_BURN = 0.09
+# Percent of a window kept back on the orchestrator's account, so that it can still coordinate the other
+# accounts while its own fills up.
+ORCHESTRATOR_RESERVE = 5.0
 
 
 def reaction_minutes(running: list[dict]) -> float:
@@ -43,30 +40,20 @@ def reaction_minutes(running: list[dict]) -> float:
     return max(measurements.median_or(f"reaction/{c}", meter.DEFAULT_REACTION_MINUTES) for c in configs)
 
 
-def learn(account: str, on_account: list[dict], burn: float | None) -> None:
-    """Records how fast one agent of a model uses the account, when all agents on it share a model, or the
-    orchestrator's own use, when no agent runs on its account."""
-    # Only a measured, nonzero burn says anything. An idle account shows none.
-    if not burn:
-        return
-    configs = {agent["config"] for agent in on_account}
-    if len(configs) == 1:
-        measurements.record(f"burn/{configs.pop()}", burn / len(on_account))
-    elif not on_account and account == usage.orchestrator_account():
-        measurements.record(f"orchestrator/{account}/{usage.orchestrator().get('model')}", burn)
-
-
 def reserve_for(account: str) -> float:
-    if account != usage.orchestrator_account():
-        return 0.0
-    key = f"orchestrator/{account}/{usage.orchestrator().get('model')}"
-    return measurements.median_or(key, DEFAULT_ORCHESTRATOR_BURN) * ORCHESTRATOR_RESERVE_MINUTES
+    return ORCHESTRATOR_RESERVE if account == usage.orchestrator_account() else 0.0
 
 
-def refresh(account: usage.Account, running: int) -> None:
-    readings = [reading for window in usage.windows(account.name).values() for reading in window]
-    age = time.time() - max((reading.time for reading in readings), default=0)
-    if age > (STALE_BUSY_SECONDS if running else STALE_IDLE_SECONDS):
+def latest_reading(account: str) -> float:
+    return max((reading.time for window in usage.windows(account).values() for reading in window), default=0.0)
+
+
+def refresh(account: usage.Account, on_account: list[dict]) -> None:
+    """Takes a fresh reading when the last one is old, or when agents started after it, so that the next
+    decision sees what they use."""
+    latest = latest_reading(account.name)
+    started_since = any(agent["started"] > latest for agent in on_account)
+    if started_since or time.time() - latest > (STALE_BUSY_SECONDS if on_account else STALE_IDLE_SECONDS):
         usage.probe(account)
 
 
@@ -91,28 +78,27 @@ def clear_old_notices(running: list[dict]) -> None:
         usage.WIND_DOWN.rmdir()
 
 
-def decisions(agent_type: str | None = None) -> dict[str, meter.Decision]:
+def decisions() -> dict[str, meter.Decision]:
     running = usage.running_agents()
     clear_old_notices(running)
-    new_agent_burn = None
-    if agent_type:
-        known = measurements.recent(f"burn/{usage.agent_config(agent_type)}")
-        new_agent_burn = statistics.median(known) if known else None
     result = {}
     for account in usage.accounts():
         on_account = [agent for agent in running if agent["account"] == account.name]
-        refresh(account, len(on_account))
+        refresh(account, on_account)
         windows = usage.windows(account.name)
         if not windows:
             # Without any reading, the account's use is unknown, so nothing starts on it.
             result[account.name] = meter.Decision("hold", 0, 0, float("nan"), 0.0)
             continue
+        latest = latest_reading(account.name)
         load = meter.Load(
-            len(on_account), reaction_minutes(on_account), CHECK_SECONDS / 60, reserve_for(account.name), new_agent_burn
+            agents=len(on_account),
+            reaction=reaction_minutes(on_account),
+            interval=CHECK_SECONDS / 60,
+            reserve=reserve_for(account.name),
+            measured_since_last_start=all(agent["started"] < latest for agent in on_account),
         )
         decision = meter.decide(windows, time.time(), load)
-        rates = [rate for w in windows.values() if (rate := meter.burn_rate(w, time.time())) is not None]
-        learn(account.name, on_account, max(rates, default=None))
         tell_to_wind_down(on_account, decision.wind_down)
         result[account.name] = decision
     return result
@@ -151,10 +137,9 @@ def watch() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--for", dest="agent_type", help="count the room for an agent of this type")
     parser.add_argument("--watch", action="store_true", help="exit when a decision changes, or after 50 minutes")
     arguments = parser.parse_args()
-    print(watch() if arguments.watch else report(decisions(arguments.agent_type)))
+    print(watch() if arguments.watch else report(decisions()))
     return 0
 
 
