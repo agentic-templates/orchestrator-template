@@ -11,6 +11,7 @@ description: How to review a pull request or a plan. Read it before you review o
 - Report only what must change: wrong behavior, a missing test, a security problem, or code and text that break the skills. Give each error a case that shows it, such as an input and the wrong result, and say what to change.
 - A mistake an agent could make by accident is an error. A command written on purpose to get past a hook or a check is not.
 - Don't ask for changes that a formatter would make, or for work outside the issue. Put a problem outside the issue in your report instead.
+- Run `scripts/check --review --base <base commit>`, and judge each function it lists in context. Ask for a change only where the function is hard to follow. Moving code into helpers only to lower a count isn't a fix, and neither is a split that makes the code harder to read.
 - Read the pull request's description against the `writing` skill. You may cut or reword sentences, but don't ask for more text.
 - In a second review, read only what changed since the first one.
 

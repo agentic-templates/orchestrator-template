@@ -50,15 +50,15 @@ def lines(text: str) -> list[Line]:
 def text_lines(text: str) -> list[tuple[int, str]]:
     """The numbered lines that aren't empty, front matter or code."""
     result = []
-    skipping_until = "---" if text.startswith("---\n") else None
+    in_front_matter = text.startswith("---\n")
+    in_code = False
     for number, raw in enumerate(text.splitlines(), start=1):
         stripped = raw.strip()
-        if skipping_until is not None:
-            if stripped.startswith(skipping_until) and number > 1:
-                skipping_until = None
+        if in_front_matter:
+            in_front_matter = number == 1 or stripped != "---"
         elif stripped.startswith("```"):
-            skipping_until = "```"
-        elif stripped:
+            in_code = not in_code
+        elif stripped and not in_code:
             result.append((number, raw))
     return result
 

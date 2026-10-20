@@ -4,10 +4,11 @@
 # ///
 """Runs the checks on the files that the branch changes, or on every file with --all, as CI does.
 
-usage: scripts/check [--all] [--base <commit>]
+usage: scripts/check [--all] [--base <commit>] [--review]
 
 Without --base, the branch's changes are counted from where it left origin/main, together with
-uncommitted and untracked files. Each check prints "<file>:<line>: <what to do>". The exit status is 1
+uncommitted and untracked files. With --review, it lists what a reviewer should judge, such as functions
+that are hard to follow, and doesn't fail. Each check prints "<file>:<line>: <what to do>". The exit status is 1
 when any check fails.
 
 To add a language, add its tools to TOOLS, as the `languages` skill describes.
@@ -28,10 +29,15 @@ ROOT = Path(__file__).resolve().parent.parent
 TOOLS = [
     ("python", ["uvx", "ruff@0.17.0", "check", "--quiet"]),
     ("python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet"]),
-    ("python", ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "15", "--failed", "--plain"]),
+    ("python", ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "25", "--failed", "--plain"]),
     ("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
     ("workflow", ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]),
     ("any", ["uvx", "typos@1.51.1"]),
+]
+# With --review, these run instead, and list what a reviewer should judge without failing the check.
+# A function's cognitive complexity fails the check at 25, and a reviewer sees it from 15.
+REVIEW_TOOLS = [
+    ("python", ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "15", "--failed", "--plain"]),
 ]
 # Each test command runs once when the branch changes a file of its kind.
 TESTS = [
@@ -84,14 +90,14 @@ def check_files(paths: list[str]) -> list[str]:
     return problems
 
 
-def run_tools(paths: list[str]) -> bool:
+def run_tools(paths: list[str], tools: list = TOOLS, tests: list = TESTS) -> bool:
     kinds = {path: kind(path) for path in paths}
     passed = True
-    for wanted, command in TOOLS:
+    for wanted, command in tools:
         targets = [path for path in paths if wanted in ("any", kinds[path])]
         if targets and subprocess.run([*command, *targets], check=False, cwd=ROOT).returncode != 0:
             passed = False
-    for wanted, command in TESTS:
+    for wanted, command in tests:
         if wanted in kinds.values() and subprocess.run(command, check=False, cwd=ROOT).returncode != 0:
             passed = False
     return passed
@@ -101,9 +107,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--all", action="store_true", help="check every file, as CI does in the merge queue")
     parser.add_argument("--base", help="count the changes from this commit")
+    parser.add_argument("--review", action="store_true", help="list what a reviewer should judge, without failing")
     arguments = parser.parse_args()
     paths = git("ls-files") if arguments.all else changed_files(arguments.base)
     paths = [path for path in paths if (ROOT / path).is_file() and not (ROOT / path).is_symlink()]
+    if arguments.review:
+        run_tools(paths, REVIEW_TOOLS, tests=[])
+        return 0
     problems = check_files(paths)
     print("\n".join(problems), end="\n" if problems else "", flush=True)
     tools_passed = run_tools(paths)
