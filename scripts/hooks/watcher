@@ -1,0 +1,32 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A Stop hook that keeps the orchestrator from ending a turn while scripts/watch isn't running.
+
+Only a command that the orchestrator runs in the background wakes it when it exits, so the hook can't start the
+watcher itself. It asks the orchestrator to, once: if the orchestrator stops again without it, the hook lets it.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import usage
+
+PID = usage.LOOP / "watch.pid"
+
+
+def main() -> None:
+    event = json.load(sys.stdin)
+    if event.get("agent_type") not in (None, "orchestrator") or event.get("stop_hook_active"):
+        return
+    if PID.exists() and usage.is_running(int(PID.read_text())):
+        return
+    reason = "scripts/watch isn't running. Start it in the background before you end your turn."
+    print(json.dumps({"decision": "block", "reason": reason}))
+
+
+if __name__ == "__main__":
+    main()

@@ -41,8 +41,9 @@ def refresh(account: usage.Account, on_account: list[dict]) -> None:
 
 
 WIND_DOWN = (
-    "Wind down: the account is close to its usage limit. Finish the step you're on, commit, push the branch, "
-    "and end with your report, saying what's left. Don't start another step."
+    "Wind down: the account is close to its usage limit. Finish the step you're on and don't start another. If "
+    "you're building an issue, hand off as the building skill describes. Otherwise, end with your report, saying "
+    "what's left."
 )
 
 

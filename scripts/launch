@@ -47,7 +47,12 @@ def prompt_for(arguments: argparse.Namespace) -> str:
         return f"Answer research issue #{number}."
     if arguments.successor:
         note = usage.LOOP / "handoff" / f"issue-{number}.md"
-        return f"Continue issue #{number}. The builder before you handed off: read {note} first."
+        if not note.exists():
+            return (
+                f"Continue issue #{number}. The builder before you stopped without a hand-off note, and its work is on "
+                "your branch. Start from `git log` and the issue."
+            )
+        return f"Continue issue #{number}. The builder before you handed off with this note:\n\n{note.read_text()}"
     return f"Build issue #{number}."
 
 
