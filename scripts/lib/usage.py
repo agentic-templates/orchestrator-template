@@ -162,11 +162,30 @@ def read_rate_limits(server: subprocess.Popen) -> dict[str, dict]:
 
 
 def running_agents() -> list[dict]:
-    """The agents that the registry lists as running, oldest first."""
+    """The agents that scripts/launch started and that still run, oldest first. An agent whose launcher has gone
+    without saying so, such as after a crash, is marked as stopped."""
     if not AGENTS.exists():
         return []
-    agents = [json.loads(path.read_text()) for path in AGENTS.glob("*.json")]
-    return sorted((agent for agent in agents if "stopped" not in agent), key=lambda agent: agent["started"])
+    running = []
+    for path in AGENTS.glob("*.json"):
+        agent = json.loads(path.read_text())
+        if "stopped" in agent:
+            continue
+        if is_running(agent["pid"]):
+            running.append(agent)
+        else:
+            save_agent({**agent, "stopped": time.time()})
+    return sorted(running, key=lambda agent: agent["started"])
+
+
+def is_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def save_agent(agent: dict) -> None:

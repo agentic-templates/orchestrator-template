@@ -3,7 +3,6 @@ name: builder-deep
 description: Builds one ready issue with the `deep` label, work that needs more thought than most, into a pull request in its own worktree.
 model: opus
 effort: xhigh
-isolation: worktree
 skills: [building, code, writing]
 ---
 

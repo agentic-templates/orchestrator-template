@@ -1,0 +1,85 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Starts an agent in a worktree of its own, waits until it's done, and prints its report.
+
+usage: scripts/launch <agent type> <issue or pull request> [--account <name>] [--second-review] [--successor]
+
+Run it in the background: its exit wakes the orchestrator. The agent runs as a headless session of its own, so
+that the orchestrator's refreshes and crashes don't touch it, and scripts/message can still reach it while it
+works. Without --account, it starts on the account that scripts/meter names.
+
+- A builder gets the issue's number. With --successor, it continues the issue from the hand-off note that the
+  builder before it wrote, on the same branch.
+- A reviewer gets the pull request's number, and --second-review for its second review.
+- A researcher gets the research issue's number.
+
+The agent is done once it has given its report, nothing has come from it for a minute, and it runs no command in
+the background. The launcher then stops it, commits and pushes any work left in its worktree, and prints its
+report. Stopping the launcher does the same.
+"""
+
+import argparse
+import os
+import signal
+import sys
+import time
+import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import launching
+import metering
+import usage
+
+
+def prompt_for(arguments: argparse.Namespace) -> str:
+    number = arguments.number
+    if arguments.agent_type.startswith("reviewer"):
+        review = "second" if arguments.second_review else "first"
+        return f"Review pull request #{number}. This is its {review} review."
+    if arguments.agent_type == "researcher":
+        return f"Answer research issue #{number}."
+    if arguments.successor:
+        note = usage.LOOP / "handoff" / f"issue-{number}.md"
+        return f"Continue issue #{number}. The builder before you handed off: read {note} first."
+    return f"Build issue #{number}."
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("agent_type")
+    parser.add_argument("number", type=int)
+    parser.add_argument("--account")
+    parser.add_argument("--second-review", action="store_true")
+    parser.add_argument("--successor", action="store_true")
+    arguments = parser.parse_args()
+    name = arguments.account or metering.next_account(metering.decisions())
+    account = next((a for a in usage.accounts() if a.name == name), None)
+    if account is None:
+        print("No account has room for an agent now. scripts/meter says why.")
+        return 2
+    agent_id = f"{arguments.agent_type}-{arguments.number}-{uuid.uuid4().hex[:6]}"
+    branch = f"issue-{arguments.number}" if arguments.successor else None
+    worktree = launching.make_worktree(agent_id, branch)
+    session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments))
+    signal.signal(signal.SIGTERM, lambda *_: launching.finish(session, "stopped"))
+    record = {
+        "id": agent_id,
+        "name": arguments.agent_type,
+        "config": usage.agent_config(arguments.agent_type),
+        "account": account.name,
+        "number": arguments.number,
+        "started": time.time(),
+        "pid": os.getpid(),
+        "worktree": str(worktree),
+        "transcript": str(session.transcript),
+    }
+    usage.save_agent(record)
+    print(launching.wait(session, record))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
