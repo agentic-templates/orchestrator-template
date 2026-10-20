@@ -1,0 +1,61 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Watches the loop every minute, and exits with a report when something needs the orchestrator.
+
+usage: scripts/watch
+
+The orchestrator runs it in the background, and its exit wakes the orchestrator. Every minute it:
+
+- runs the meter's decisions for every account, and tells agents to wind down when an account nears its limit
+- tells each session to hand off or refresh once a fresh one would cost less, and winds everything down when a
+  session nears its context limit
+- retries a refresh that hasn't happened, once
+- reports pull requests that merged, opened or failed their checks, and agents that have done nothing for a while
+- opens a `loop` issue when an agent type starts running a model it hasn't run before
+
+It also exits after 50 minutes, so that the orchestrator's prompt cache, which lasts an hour, stays warm.
+"""
+
+import json
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import metering
+import watching
+
+WARM_WAKE_SECONDS = 50 * 60
+
+
+def check(state: dict, actions: dict[str, str]) -> list[str]:
+    result = metering.decisions()
+    events = [f"Usage: {name} now says {d.action}." for name, d in result.items() if actions.get(name) != d.action]
+    actions.update({name: d.action for name, d in result.items()})
+    events += watching.check_contexts()
+    events += watching.check_refresh(state)
+    events += watching.check_pull_requests(state)
+    events += watching.check_stalled(state)
+    events += watching.check_models(state)
+    return events
+
+
+def main() -> int:
+    started = time.time()
+    state = watching.load_state()
+    actions = {name: d.action for name, d in metering.decisions().items()}
+    while time.time() - started < WARM_WAKE_SECONDS:
+        time.sleep(metering.CHECK_SECONDS)
+        events = check(state, actions)
+        watching.STATE.write_text(json.dumps(state))
+        if events:
+            print("\n".join(events) + "\n\n" + metering.report(metering.decisions()))
+            return 0
+    print("Warm wake: 50 minutes passed without anything new.\n\n" + metering.report(metering.decisions()))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

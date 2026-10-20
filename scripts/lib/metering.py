@@ -1,0 +1,112 @@
+"""The meter's decisions for every account, from their readings and the agents that run on them."""
+
+import shutil
+import time
+
+import measurements
+import meter
+import usage
+
+CHECK_SECONDS = 60
+# A reading this old is replaced before the decision, more often for an account that agents are using. An idle
+# account's reading is replaced once it's too old for an agent to start on.
+STALE_BUSY_SECONDS = 5 * 60
+STALE_IDLE_SECONDS = meter.STALE_MINUTES * 60
+# Percent of a window kept back on the orchestrator's account, so that it can still coordinate the other
+# accounts while its own fills up.
+ORCHESTRATOR_RESERVE = 5.0
+
+
+def reaction_minutes(running: list[dict]) -> float:
+    """How long the running agents' models have taken to stop after a notice: the slowest of them."""
+    configs = {agent["config"] for agent in running} or {"default"}
+    return max(measurements.median_or(f"reaction/{c}", meter.DEFAULT_REACTION_MINUTES) for c in configs)
+
+
+def reserve_for(account: str) -> float:
+    return ORCHESTRATOR_RESERVE if account == usage.orchestrator_account() else 0.0
+
+
+def latest_reading(account: str) -> float:
+    return max((reading.time for window in usage.windows(account).values() for reading in window), default=0.0)
+
+
+def refresh(account: usage.Account, on_account: list[dict]) -> None:
+    """Takes a fresh reading when the last one is old, or when agents started after it, so that the next
+    decision sees what they use."""
+    latest = latest_reading(account.name)
+    started_since = any(agent["started"] > latest for agent in on_account)
+    if started_since or time.time() - latest > (STALE_BUSY_SECONDS if on_account else STALE_IDLE_SECONDS):
+        usage.probe(account)
+
+
+WIND_DOWN = (
+    "Wind down: the account is close to its usage limit. Finish the step you're on, commit, push the branch, "
+    "and end with your report, saying what's left. Don't start another step."
+)
+
+
+def tell_to_wind_down(agents: list[dict], count: int) -> None:
+    for agent in [agent for agent in agents if "told_to_wind_down" not in agent][-count:] if count else []:
+        usage.notify(agent["id"], "wind-down", WIND_DOWN)
+        agent["told_to_wind_down"] = time.time()
+        usage.save_agent(agent)
+
+
+def clear_old_notices(running: list[dict]) -> None:
+    """Removes the notices of agents that stopped, and the folder once it's empty, so that the notice hook
+    stops running."""
+    if not usage.NOTICES.exists():
+        return
+    ids = {agent["id"] for agent in running} | {usage.ORCHESTRATOR_ID}
+    for folder in usage.NOTICES.iterdir():
+        if folder.name not in ids or not any(folder.iterdir()):
+            shutil.rmtree(folder)
+    if not any(usage.NOTICES.iterdir()):
+        usage.NOTICES.rmdir()
+
+
+def decisions() -> dict[str, meter.Decision]:
+    running = usage.running_agents()
+    clear_old_notices(running)
+    result = {}
+    for account in usage.accounts():
+        on_account = [agent for agent in running if agent["account"] == account.name]
+        refresh(account, on_account)
+        windows = usage.windows(account.name)
+        if not windows:
+            # Without any reading, the account's use is unknown, so nothing starts on it.
+            result[account.name] = meter.Decision("hold", 0, 0, float("nan"), 0.0)
+            continue
+        latest = latest_reading(account.name)
+        load = meter.Load(
+            agents=len(on_account),
+            reaction=reaction_minutes(on_account),
+            interval=CHECK_SECONDS / 60,
+            reserve=reserve_for(account.name),
+            measured_since_last_start=all(agent["started"] < latest for agent in on_account),
+        )
+        decision = meter.decide(windows, time.time(), load)
+        tell_to_wind_down(on_account, decision.wind_down)
+        result[account.name] = decision
+    return result
+
+
+def next_account(result: dict[str, meter.Decision]) -> str | None:
+    """The account to start the next agent on: the least used one that has room, with the orchestrator's last."""
+    orchestrator = usage.orchestrator_account()
+    open_accounts = [name for name, decision in result.items() if decision.room]
+    return min(open_accounts, key=lambda name: (name == orchestrator, result[name].used), default=None)
+
+
+def report(result: dict[str, meter.Decision]) -> str:
+    lines = [
+        f"{name}: {d.action}"
+        + (f", room for {d.room} more" if d.room else "")
+        + (f", told {d.wind_down} to wind down" if d.wind_down else "")
+        + f" ({d.used:.0f}% used, {d.burn:.2f}% a minute)"
+        for name, d in result.items()
+    ]
+    chosen = next_account(result)
+    lines.append(f"Start the next agent on: {chosen}" if chosen else "Start no agent now.")
+    return "\n".join(lines)

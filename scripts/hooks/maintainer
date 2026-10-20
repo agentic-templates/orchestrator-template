@@ -1,0 +1,29 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A UserPromptSubmit hook that records when the maintainer last wrote to the orchestrator, so that it doesn't
+refresh its context while they're in the middle of a conversation.
+
+Messages from other sessions and notices of finished tasks arrive as prompts too, wrapped in a tag, so it skips
+any prompt that starts with one.
+"""
+
+import json
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import usage
+
+
+def main() -> None:
+    prompt = json.load(sys.stdin).get("prompt", "")
+    if not prompt.lstrip().startswith("<"):
+        usage.LOOP.mkdir(exist_ok=True)
+        usage.MAINTAINER.write_text(json.dumps({"last_message": time.time()}))
+
+
+if __name__ == "__main__":
+    main()

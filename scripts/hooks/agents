@@ -11,6 +11,7 @@ scripts/meter counts the agents on each account from it, and tells the newest on
 
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -34,6 +35,9 @@ def main() -> None:
                 "config": usage.agent_config(agent_type),
                 "account": account,
                 "started": time.time(),
+                "transcript": str(
+                    Path(event["transcript_path"]).with_suffix("") / "subagents" / f"agent-{agent_id}.jsonl"
+                ),
             }
         )
     elif path.exists():
@@ -42,7 +46,7 @@ def main() -> None:
         usage.save_agent(agent)
         if "told_to_wind_down" in agent:
             measurements.record(f"reaction/{agent['config']}", (agent["stopped"] - agent["told_to_wind_down"]) / 60)
-        (usage.WIND_DOWN / agent_id).unlink(missing_ok=True)
+        shutil.rmtree(usage.NOTICES / agent_id, ignore_errors=True)
 
 
 if __name__ == "__main__":

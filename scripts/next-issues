@@ -6,8 +6,8 @@
 
 usage: scripts/next-issues
 
-It takes the issues of the oldest open milestone, and leaves out the ones that someone outside the project
-wrote, that wait for a decision, a triage or another issue, or that already have a branch named
+It takes the issues of the oldest open milestone and the `loop` issues, which can belong to no milestone, and
+leaves out the ones that someone outside the project wrote, that wait for a decision, a triage or another issue, or that already have a branch named
 issue-<number>. Only one issue with the `loop` label is in progress at a time.
 """
 
@@ -30,24 +30,17 @@ def branches_in_progress() -> set[int]:
     return {int(match.group(1)) for name in names if (match := BRANCH.search(name))}
 
 
+def listed_issues(*filters: str) -> list[dict]:
+    fields = "number,title,labels,author"
+    return github.gh_json("issue", "list", "--state", "open", "--limit", "200", *filters, "--json", fields) or []
+
+
 def main() -> int:
     milestones = github.gh_json("api", f"repos/{github.repository()}/milestones?state=open&sort=created")
-    if not milestones:
-        print("No milestone is open. Plan the next goal as the planning skill describes.")
-        return 0
-    milestone = milestones[0]
-    listed = github.gh_json(
-        "issue",
-        "list",
-        "--milestone",
-        milestone["title"],
-        "--state",
-        "open",
-        "--limit",
-        "200",
-        "--json",
-        "number,title,labels,author",
-    )
+    milestone = milestones[0] if milestones else None
+    listed = listed_issues("--milestone", milestone["title"]) if milestone else []
+    numbers = {item["number"] for item in listed}
+    listed += [item for item in listed_issues("--label", "loop") if item["number"] not in numbers]
     issues = [
         backlog.Issue(
             number=item["number"],
@@ -60,11 +53,12 @@ def main() -> int:
     ]
     in_progress = branches_in_progress()
     ready = backlog.ready(issues, in_progress)
-    print(f"Milestone: {milestone['title']}, {len(in_progress & {i.number for i in issues})} in progress")
+    started = len(in_progress & {issue.number for issue in issues})
+    print(f"Milestone: {milestone['title'] if milestone else 'none open'}, {started} in progress")
     for issue in ready:
         print(f"#{issue.number}  {backlog.agent_type(issue):<13} {issue.title}")
     if not ready:
-        print("Nothing is ready to build.")
+        print("Nothing is ready to build." if milestone else "No milestone is open. Plan the next goal.")
     return 0
 
 

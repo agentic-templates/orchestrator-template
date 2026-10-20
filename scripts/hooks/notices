@@ -1,0 +1,30 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A PostToolBatch hook that shows an agent, once, the notice that scripts/watch or scripts/meter left for it in
+.loop/notices/, such as to wind down, to hand off to a successor, or to refresh its context.
+
+The settings run it only while that folder exists. A builder that scripts/launch started finds its ID in
+LOOP_AGENT_ID, a subagent in the hook's input, and the orchestrator has none, so it uses "orchestrator".
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import usage
+
+
+def main() -> None:
+    event = json.load(sys.stdin)
+    agent_id = os.environ.get("LOOP_AGENT_ID") or event.get("agent_id") or usage.ORCHESTRATOR_ID
+    if messages := usage.untold_notices(str(agent_id)):
+        context = "\n\n".join(messages)
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolBatch", "additionalContext": context}}))
+
+
+if __name__ == "__main__":
+    main()

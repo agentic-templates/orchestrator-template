@@ -15,8 +15,11 @@ LOOP = ROOT / ".loop"
 ACCOUNTS = LOOP / "accounts.json"
 USAGE = LOOP / "usage"
 AGENTS = LOOP / "agents"
-WIND_DOWN = LOOP / "wind-down"
+NOTICES = LOOP / "notices"
+# The orchestrator's notices go under this name, because its session isn't a subagent with an ID.
+ORCHESTRATOR_ID = "orchestrator"
 ORCHESTRATOR = LOOP / "orchestrator.json"
+MAINTAINER = LOOP / "maintainer.json"
 # Readings older than this tell nothing about the current burn, so the file keeps only these.
 KEEP_SECONDS = 8 * 3600
 
@@ -171,9 +174,37 @@ def save_agent(agent: dict) -> None:
     (AGENTS / f"{agent['id']}.json").write_text(json.dumps(agent))
 
 
+def notify(agent_id: str, kind: str, message: str) -> None:
+    """Leaves a message that the notice hook shows the agent once, after its next batch of tool calls. Each kind
+    of notice, such as "wind-down", is shown at most once to an agent."""
+    folder = NOTICES / agent_id
+    folder.mkdir(parents=True, exist_ok=True)
+    if not (folder / f"{kind}.told").exists():
+        (folder / kind).write_text(message)
+
+
+def untold_notices(agent_id: str) -> list[str]:
+    """The notices left for the agent that it hasn't seen, which this marks as seen."""
+    folder = NOTICES / agent_id
+    if not folder.is_dir():
+        return []
+    messages = []
+    for notice in sorted(path for path in folder.iterdir() if path.suffix != ".told"):
+        if not notice.with_suffix(".told").exists():
+            messages.append(notice.read_text())
+            notice.with_suffix(".told").touch()
+    return messages
+
+
 def orchestrator() -> dict:
     """The orchestrator's account and model, which its session records."""
     return json.loads(ORCHESTRATOR.read_text()) if ORCHESTRATOR.exists() else {}
+
+
+def minutes_since_maintainer_wrote() -> float:
+    if not MAINTAINER.exists():
+        return float("inf")
+    return (time.time() - json.loads(MAINTAINER.read_text())["last_message"]) / 60
 
 
 def orchestrator_account() -> str | None:
