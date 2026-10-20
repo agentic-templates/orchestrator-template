@@ -78,6 +78,7 @@
     "pr": ""
   },
   "subagentPromptCacheTtl": "1h",
+  "autoCompactEnabled": false,
   "idleCompaction": false,
   "statusLine": {
     "type": "command",

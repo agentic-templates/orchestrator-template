@@ -171,5 +171,21 @@ def save_agent(agent: dict) -> None:
     (AGENTS / f"{agent['id']}.json").write_text(json.dumps(agent))
 
 
+def orchestrator() -> dict:
+    """The orchestrator's account and model, which its session records."""
+    return json.loads(ORCHESTRATOR.read_text()) if ORCHESTRATOR.exists() else {}
+
+
 def orchestrator_account() -> str | None:
-    return json.loads(ORCHESTRATOR.read_text())["account"] if ORCHESTRATOR.exists() else None
+    return orchestrator().get("account")
+
+
+def agent_config(agent_type: str) -> str:
+    """The model and effort that an agent type runs with, such as "opus/medium", from its definition."""
+    path = ROOT / ".claude" / "agents" / f"{agent_type}.md"
+    fields = {}
+    if path.exists():
+        for line in path.read_text().split("---")[1].splitlines():
+            key, _, value = line.partition(":")
+            fields[key.strip()] = value.strip()
+    return f"{fields.get('model', 'default')}/{fields.get('effort', 'default')}"

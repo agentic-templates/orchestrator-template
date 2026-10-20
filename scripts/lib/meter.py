@@ -52,44 +52,48 @@ def rate_over(readings: list[Reading], now: float, minutes: float) -> float | No
     return max(0.0, (period[-1].used - period[0].used) / ((period[-1].time - period[0].time) / 60))
 
 
-def decide_window(
-    readings: list[Reading], now: float, agents: int, timing: tuple[float, float], reserve: float = 0.0
-) -> Decision:
+@dataclass(frozen=True)
+class Load:
+    """What runs on an account, and how it behaves."""
+
+    agents: int
+    reaction: float  # minutes an agent takes to stop after a notice
+    interval: float  # minutes until the next decision
+    reserve: float = 0.0  # percent kept back, such as for the orchestrator
+    new_agent_burn: float | None = None  # what the next agent is expected to use, if known for its model
+
+
+def decide_window(readings: list[Reading], now: float, load: Load) -> Decision:
     """What to do about one usage window.
 
-    `timing` holds the minutes an agent takes to stop after a notice, and the minutes until the next decision.
     An agent keeps using the window until it stops, so the agents that may keep running are the ones that can
-    still be told at the next decision and stop in time. `reserve` is the percent kept back, such as for the
-    orchestrator.
+    still be told at the next decision and stop in time.
     """
-    reaction, interval = timing
     latest = readings[-1] if readings else None
     fresh_window = latest is None or latest.resets_at <= now
     measured = None if fresh_window else burn_rate(readings, now)
-    burn = measured if measured is not None else DEFAULT_AGENT_BURN * agents
-    per_agent = burn / agents if agents and burn > 0 else DEFAULT_AGENT_BURN
+    burn = measured if measured is not None else DEFAULT_AGENT_BURN * load.agents
+    per_agent = burn / load.agents if load.agents and burn > 0 else DEFAULT_AGENT_BURN
     # A reading that isn't fresh is projected forward, so that missing data slows the loop down instead of hiding.
     used = 0.0 if fresh_window else latest.used + burn * (now - latest.time) / 60
-    limit = 100.0 - FLOOR - reserve
-    spare = limit - used - burn * reaction
+    limit = 100.0 - FLOOR - load.reserve
+    spare = limit - used - burn * load.reaction
     if spare <= 0:
-        return Decision("pause", 0, agents, used, burn)
-    keep = math.floor(spare / (per_agent * interval))
-    if keep < agents:
-        return Decision("wind down", 0, agents - keep, used, burn)
+        return Decision("pause", 0, load.agents, used, burn)
+    keep = math.floor(spare / (per_agent * load.interval))
+    if keep < load.agents:
+        return Decision("wind down", 0, load.agents - keep, used, burn)
     # Each new agent must be able to run until the next decision and still stop in time. Starts at most double
     # the agents, so that the burn is measured before more start.
-    allowed = math.floor((limit - used) / (per_agent * (reaction + interval)))
-    room = max(0, min(allowed - agents, max(2, agents)))
+    horizon = load.reaction + load.interval
+    allowed = math.floor((limit - used - burn * horizon) / ((load.new_agent_burn or per_agent) * horizon))
+    room = max(0, min(allowed, max(2, load.agents)))
     return Decision("start" if room else "hold", room, 0, used, burn)
 
 
-def decide(
-    windows: dict[str, list[Reading]], now: float, agents: int, timing: tuple[float, float], reserve: float = 0.0
-) -> Decision:
+def decide(windows: dict[str, list[Reading]], now: float, load: Load) -> Decision:
     """The strictest decision over an account's windows, such as its 5-hour and weekly ones."""
-    decisions = [decide_window(readings, now, agents, timing, reserve) for readings in windows.values()]
-    decisions = decisions or [decide_window([], now, agents, timing, reserve)]
+    decisions = [decide_window(readings, now, load) for readings in windows.values()] or [decide_window([], now, load)]
     strictest = max(decisions, key=lambda decision: ORDER.index(decision.action))
     room = min(decision.room for decision in decisions)
     wind_down = max(decision.wind_down for decision in decisions)

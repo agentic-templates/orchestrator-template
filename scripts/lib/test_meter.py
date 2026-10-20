@@ -8,7 +8,6 @@ from meter import Reading
 MINUTE = 60.0
 WINDOW = 300  # minutes in a 5-hour window
 REACTION = 8.0
-TIMING = (REACTION, 1.0)
 
 
 @dataclass
@@ -43,7 +42,7 @@ class Simulation:
                 self.agent_burn *= burn_change[1]
             self.read(minute, now)
             running = [agent for agent in self.agents if agent.stops_in is None]
-            self.act(meter.decide({"5h": self.readings}, now, len(running), TIMING))
+            self.act(meter.decide({"5h": self.readings}, now, meter.Load(len(running), REACTION, 1.0)))
             self.work()
         return self
 
@@ -104,19 +103,27 @@ class WindDownTest(unittest.TestCase):
 
 class DecideTest(unittest.TestCase):
     def test_starts_on_an_account_with_no_readings_or_a_reset_window(self):
-        self.assertEqual(meter.decide({}, 0, 0, TIMING).action, "start")
+        self.assertEqual(meter.decide({}, 0, meter.Load(0, REACTION, 1.0)).action, "start")
         reset = [Reading(0, 99, 100)]
-        self.assertEqual(meter.decide({"5h": reset}, 200, 3, TIMING).action, "start")
+        self.assertEqual(meter.decide({"5h": reset}, 200, meter.Load(3, REACTION, 1.0)).action, "start")
 
     def test_the_strictest_window_decides(self):
         five_hour = [Reading(0, 10, 10_000), Reading(600, 12, 10_000)]
         weekly = [Reading(0, 97.06, 900_000), Reading(600, 97.56, 900_000)]
-        self.assertEqual(meter.decide({"5h": five_hour, "7d": weekly}, 600, 2, TIMING).action, "wind down")
+        self.assertEqual(
+            meter.decide({"5h": five_hour, "7d": weekly}, 600, meter.Load(2, REACTION, 1.0)).action, "wind down"
+        )
+
+    def test_counts_room_by_the_burn_of_the_agent_about_to_start(self):
+        readings = [Reading(0, 50, 10_000), Reading(600, 51, 10_000)]
+        cheap = meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0, new_agent_burn=0.01))
+        costly = meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0, new_agent_burn=10.0))
+        self.assertEqual((cheap.action, costly.action), ("start", "hold"))
 
     def test_a_reserve_holds_the_account_back_earlier(self):
         readings = [Reading(0, 80, 10_000), Reading(600, 82, 10_000)]
-        self.assertEqual(meter.decide({"5h": readings}, 600, 2, TIMING).action, "start")
-        self.assertEqual(meter.decide({"5h": readings}, 600, 2, TIMING, reserve=15).action, "pause")
+        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0)).action, "start")
+        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0, reserve=15)).action, "pause")
 
 
 if __name__ == "__main__":

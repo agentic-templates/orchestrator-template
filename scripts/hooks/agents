@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import measurements
 import usage
 
 
@@ -25,11 +26,22 @@ def main() -> None:
     path = usage.AGENTS / f"{agent_id}.json"
     if sys.argv[1] == "start":
         account = usage.account_of(dict(os.environ))
-        usage.save_agent({"id": agent_id, "name": event.get("agent_type"), "account": account, "started": time.time()})
+        agent_type = event.get("agent_type", "")
+        usage.save_agent(
+            {
+                "id": agent_id,
+                "name": agent_type,
+                "config": usage.agent_config(agent_type),
+                "account": account,
+                "started": time.time(),
+            }
+        )
     elif path.exists():
         agent = json.loads(path.read_text())
         agent["stopped"] = time.time()
         usage.save_agent(agent)
+        if "told_to_wind_down" in agent:
+            measurements.record(f"reaction/{agent['config']}", (agent["stopped"] - agent["told_to_wind_down"]) / 60)
         (usage.WIND_DOWN / agent_id).unlink(missing_ok=True)
 
 
