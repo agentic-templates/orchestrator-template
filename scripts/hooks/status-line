@@ -13,10 +13,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 import usage
 
 
+def record_orchestrator(account: str, status: dict) -> None:
+    """Saves where the orchestrator's transcript is and how big its context window is, for scripts/watch."""
+    orchestrator = usage.orchestrator()
+    if orchestrator.get("account") != account:
+        return
+    window = (status.get("context_window") or {}).get("context_window_size")
+    update = {"transcript": status.get("transcript_path"), "window": window}
+    if any(orchestrator.get(key) != value for key, value in update.items() if value):
+        usage.ORCHESTRATOR.write_text(json.dumps({**orchestrator, **{k: v for k, v in update.items() if v}}))
+
+
 def main() -> None:
     status = json.load(sys.stdin)
     account = usage.account_of(dict(os.environ))
     usage.record_status_line(account, status)
+    record_orchestrator(account, status)
     limits = status.get("rate_limits") or {}
     parts = [f"{name.replace('_', ' ')} {values['used_percentage']:.0f}%" for name, values in limits.items() if values]
     print(" · ".join(parts) or "no usage reading yet")

@@ -140,7 +140,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "[ -d \"${CLAUDE_PROJECT_DIR}/.loop/wind-down\" ] && exec \"${CLAUDE_PROJECT_DIR}/scripts/hooks/wind-down\" || true"
+            "command": "[ -d \"${CLAUDE_PROJECT_DIR}/.loop/notices\" ] && exec \"${CLAUDE_PROJECT_DIR}/scripts/hooks/notices\" || true"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/scripts/hooks/maintainer"
           }
         ]
       }
