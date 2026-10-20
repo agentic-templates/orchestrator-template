@@ -13,9 +13,10 @@ FLOOR = 2.0
 DEFAULT_REACTION_MINUTES = 8.0
 # Percent of a window per minute that one agent uses, until the account's own readings show it.
 DEFAULT_AGENT_BURN = 0.1
-# An agent starts only if it could run this long before the account would have to stop it, so that the cost of
-# starting it, which writes its whole context to the cache, buys real work.
-MIN_RUN_MINUTES = 30.0
+# An agent starts only if it could work this long before the account would have to stop it, so that the cost of
+# starting it, which writes its whole context to the cache, buys some real work. It doesn't need to finish,
+# because a builder that has to stop saves its work for a successor.
+MIN_RUN_MINUTES = 10.0
 # No agent starts on a reading older than this, because the account may have moved since.
 STALE_MINUTES = 10.0
 # The burn rate is the larger of the rates over these spans of recent readings, so that a rise shows quickly

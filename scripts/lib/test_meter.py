@@ -125,9 +125,13 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0)).action, "start")
 
     def test_starts_no_agent_that_would_have_to_stop_soon(self):
-        # At 0.5% a minute, the account reaches its stop point in about 14 minutes, too soon for a new agent.
+        # One agent at 0.5% a minute, at 91%: two agents would reach the stop point in 7 minutes.
         readings = [Reading(0, 86, 10_000), Reading(600, 91, 10_000)]
         self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0)).action, "hold")
+
+    def test_starts_an_agent_with_a_tenth_of_the_window_left_and_nothing_running(self):
+        readings = [Reading(0, 88, 10_000), Reading(600, 88, 10_000)]
+        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(0, REACTION, 1.0)).action, "start")
 
     def test_a_reserve_holds_the_account_back_earlier(self):
         readings = [Reading(0, 80, 10_000), Reading(600, 82, 10_000)]
