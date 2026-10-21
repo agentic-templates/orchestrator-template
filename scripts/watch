@@ -45,7 +45,7 @@ def check(state: dict, actions: dict[str, str]) -> list[str]:
 
 
 def main() -> int:
-    if watching.PID.exists() and usage.is_running(running := int(watching.PID.read_text())):
+    if watching.PID.exists() and usage.is_running(running := int(watching.PID.read_text()), "watch"):
         print(f"scripts/watch runs already, as process {running}. Its exit wakes you, so you don't need another.")
         return 0
     watching.PID.write_text(str(os.getpid()))

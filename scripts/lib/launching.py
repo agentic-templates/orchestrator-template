@@ -248,7 +248,11 @@ def finish(session: Session, why: str) -> str:
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if session.process.poll() is None:
         session.process.terminate()
-        session.process.wait(timeout=30)
+        try:
+            session.process.wait(timeout=usage.STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            session.process.kill()
+            session.process.wait()
     session.input_path.unlink(missing_ok=True)
     record = json.loads((usage.AGENTS / f"{session.agent_id}.json").read_text())
     with git_lock():
