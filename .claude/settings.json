@@ -35,12 +35,6 @@
   "sandbox": {
     "enabled": true,
     "enableWeakerNetworkIsolation": true,
-    "excludedCommands": [
-      "gh *",
-      "git push *",
-      "git fetch *",
-      "git pull *"
-    ],
     "filesystem": {
       "allowWrite": [
         "~/.cache/uv",
