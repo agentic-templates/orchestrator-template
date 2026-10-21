@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import metering
+import usage
 import watching
 
 WARM_WAKE_SECONDS = 50 * 60
@@ -60,9 +61,12 @@ def watch() -> int:
         events = check(state, actions)
         watching.STATE.write_text(json.dumps(state))
         if events:
-            print("\n".join(events) + "\n\n" + metering.report(metering.decisions()))
+            print("\n".join(events) + "\n\n" + metering.report(metering.decisions(), usage.accounts()))
             return 0
-    print("Warm wake: 50 minutes passed without anything new.\n\n" + metering.report(metering.decisions()))
+    print(
+        "Warm wake: 50 minutes passed without anything new.\n\n"
+        + metering.report(metering.decisions(), usage.accounts())
+    )
     return 0
 
 

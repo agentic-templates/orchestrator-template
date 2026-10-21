@@ -43,16 +43,18 @@ def choose_account(
 ) -> tuple[usage.Account | None, str]:
     """The account to start an agent on: the one requested if the meter gives it room, or else the one the meter
     names. Without one, the reason why the agent can't start."""
-    name = requested or metering.next_account(decisions)
+    name = requested or metering.next_account(decisions, accounts)
     if name is None:
-        return None, "No account has room for an agent now.\n\n" + metering.report(decisions)
+        return None, "No account has room for an agent now.\n\n" + metering.report(decisions, accounts)
     account = next((a for a in accounts if a.name == name), None)
     if account is None:
         return None, f"No account is called {name}. .loop/accounts.json lists the accounts."
+    if account.provider not in metering.LAUNCHABLE_PROVIDERS:
+        return None, f"{name} is a {account.provider} account, and scripts/launch can't start agents there yet."
     if not decisions[name].room and not force:
         return None, (
             f"The meter gives {name} no room for an agent now. Run this again without --account to start on the "
-            f"account it names.\n\n{metering.report(decisions)}"
+            f"account it names.\n\n{metering.report(decisions, accounts)}"
         )
     return account, ""
 

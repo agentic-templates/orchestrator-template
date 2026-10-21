@@ -13,6 +13,8 @@ CHECK_SECONDS = 60
 # account's reading is replaced once it's too old for an agent to start on.
 STALE_BUSY_SECONDS = 5 * 60
 STALE_IDLE_SECONDS = meter.STALE_MINUTES * 60
+# The providers whose agents scripts/launch can start.
+LAUNCHABLE_PROVIDERS = {"claude"}
 # Percent of a window kept back on the orchestrator's account, so that it can still coordinate the other
 # accounts while its own fills up.
 ORCHESTRATOR_RESERVE = 5.0
@@ -94,10 +96,12 @@ def decisions() -> dict[str, meter.Decision]:
     return result
 
 
-def next_account(result: dict[str, meter.Decision]) -> str | None:
-    """The account to start the next agent on: the least used one that has room, with the orchestrator's last."""
+def next_account(result: dict[str, meter.Decision], accounts: list[usage.Account]) -> str | None:
+    """The account to start the next agent on: the least used one that has room, with the orchestrator's last. Only
+    accounts whose provider scripts/launch can start count."""
     orchestrator = usage.orchestrator_account()
-    open_accounts = [name for name, decision in result.items() if decision.room]
+    launchable = {account.name for account in accounts if account.provider in LAUNCHABLE_PROVIDERS}
+    open_accounts = [name for name, decision in result.items() if decision.room and name in launchable]
     return min(open_accounts, key=lambda name: (name == orchestrator, result[name].used), default=None)
 
 
@@ -112,8 +116,8 @@ def report_line(name: str, d: meter.Decision) -> str:
     )
 
 
-def report(result: dict[str, meter.Decision]) -> str:
+def report(result: dict[str, meter.Decision], accounts: list[usage.Account]) -> str:
     lines = [report_line(name, d) for name, d in result.items()]
-    chosen = next_account(result)
+    chosen = next_account(result, accounts)
     lines.append(f"Start the next agent on: {chosen}" if chosen else "Start no agent now.")
     return "\n".join(lines)
