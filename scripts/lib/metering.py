@@ -1,5 +1,6 @@
 """The meter's decisions for every account, from their readings and the agents that run on them."""
 
+import math
 import shutil
 import time
 
@@ -100,14 +101,19 @@ def next_account(result: dict[str, meter.Decision]) -> str | None:
     return min(open_accounts, key=lambda name: (name == orchestrator, result[name].used), default=None)
 
 
-def report(result: dict[str, meter.Decision]) -> str:
-    lines = [
+def report_line(name: str, d: meter.Decision) -> str:
+    if math.isnan(d.used):
+        return f"{name}: {d.action} (no reading yet)"
+    return (
         f"{name}: {d.action}"
         + (f", room for {d.room} more" if d.room else "")
         + (f", told {d.wind_down} to wind down" if d.wind_down else "")
         + f" ({d.used:.0f}% used, {d.burn:.2f}% a minute)"
-        for name, d in result.items()
-    ]
+    )
+
+
+def report(result: dict[str, meter.Decision]) -> str:
+    lines = [report_line(name, d) for name, d in result.items()]
     chosen = next_account(result)
     lines.append(f"Start the next agent on: {chosen}" if chosen else "Start no agent now.")
     return "\n".join(lines)
