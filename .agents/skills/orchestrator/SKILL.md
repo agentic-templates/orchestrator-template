@@ -11,9 +11,9 @@ How you do each step in your tool is in the skill for your provider, such as `or
 
 ## Start where the last session stopped
 
-At the start of a session, and after compaction, the session-start hook gives you `.loop/state.md` and the output of `scripts/status`. The status lists the agents still running, the worktrees with the changed files of agents that stopped, and the open pull requests. Carry on from there.
+At the start of a session, and after each refresh of your context, the session-start hook gives you `.loop/state.md` and the output of `scripts/status`. The status lists the agents still running, the worktrees with the changed files of agents that stopped, and the open pull requests. Carry on from there.
 
-Keep `.loop/state.md` current: the goal you're working on, the decisions that aren't in an issue yet, and what you're waiting for. Rewrite it in place.
+Keep `.loop/state.md` current: the goal you're working on, the decisions that aren't in an issue yet, what you're waiting for, and each temporary instruction from the maintainer that still holds. Rewrite it in place.
 
 ## Take in what the maintainer says
 

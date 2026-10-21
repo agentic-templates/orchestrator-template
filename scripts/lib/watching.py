@@ -9,6 +9,7 @@ from pathlib import Path
 import contexts
 import github
 import metering
+import refreshing
 import thresholds
 import usage
 
@@ -16,8 +17,7 @@ ROOT = usage.ROOT
 STATE = usage.LOOP / "watch.json"
 PID = usage.LOOP / "watch.pid"
 CONTEXTS = usage.LOOP / "contexts.json"
-REFRESH_REQUEST = usage.LOOP / "refresh-request"
-REFRESH_WAITING = usage.LOOP / "refresh-waiting"
+SENDER_PID = usage.LOOP / "send-clear.pid"
 # The orchestrator holds off a refresh while the maintainer wrote to it within this many minutes.
 ACTIVE_MINUTES = 5
 # A refresh that hasn't happened this long after the request has failed, unless the sender says what it waits for.
@@ -38,12 +38,16 @@ HAND_OFF_NOW = (
 )
 REFRESH = (
     "Refresh soon: your context has grown past the point where a fresh session usually costs less. Keep going "
-    "until you reach a point where the next session wouldn't have to reread what you've loaded. Then rewrite "
-    ".loop/state.md and run scripts/refresh as the last step of your turn."
+    "until you reach a point where the next session wouldn't have to reread what you've loaded. Then run "
+    "scripts/refresh and do what it says."
 )
 REFRESH_NOW = (
-    "Refresh now: your context is close to its limit, and the agents are winding down. Rewrite .loop/state.md and "
-    "run scripts/refresh as soon as the step you're on is done."
+    "Refresh now: your context is close to its limit, and the agents are winding down. As soon as the step you're "
+    "on is done, run scripts/refresh and do what it says."
+)
+REFRESH_FAILED = (
+    "The refresh failed twice. Send the maintainer a notification that asks them to type /clear in this session and "
+    'press Enter, then type "Continue the loop." and press Enter. Carry on with the loop until then.'
 )
 
 
@@ -102,19 +106,39 @@ def notify_about_context(agent_id: str, agent_type: str, current: int, limits: t
 
 
 def check_refresh(state: dict) -> list[str]:
-    """Retries a refresh once when it hasn't happened in time, and reports it when the retry fails too."""
-    if not REFRESH_REQUEST.exists() or REFRESH_WAITING.exists():
-        state.pop("refresh_retried", None)
+    """Retries a refresh once when it hasn't happened in time, and has the orchestrator tell the maintainer when the
+    retry fails too. Missing the refresh point only makes each turn cost more, so the loop carries on; the emergency
+    point near the context's limit still winds everything down.
+    A sender that still runs is waiting for a reason, and a request that a tool call cancelled is the Stop hook's
+    to handle."""
+    saved = refreshing.load_request()
+    if saved is None or refreshing.is_cancelled(saved) or is_sender_running():
         return []
-    if time.time() - REFRESH_REQUEST.stat().st_mtime < REFRESH_SECONDS:
+    if time.time() - saved["time"] < REFRESH_SECONDS:
         return []
-    if not state.get("refresh_retried"):
-        state["refresh_retried"] = time.time()
-        subprocess.Popen([str(ROOT / "scripts" / "send-clear")], start_new_session=True)
+    retried = state.get("refresh_retried", {})
+    if retried.get("request") != saved["time"]:
+        state["refresh_retried"] = {"request": saved["time"], "time": time.time()}
+        subprocess.Popen([str(ROOT / "scripts" / "send-clear")], stdin=subprocess.DEVNULL, start_new_session=True)
         return []
-    if time.time() - state["refresh_retried"] > REFRESH_SECONDS:
-        return ["The refresh failed twice. Clear the orchestrator's session by hand, or check scripts/send-clear."]
-    return []
+    if time.time() - retried["time"] < REFRESH_SECONDS or retried.get("reported"):
+        return []
+    retried["reported"] = True
+    # Dropped, so that the orchestrator's next tool call doesn't cancel it and ask for another try.
+    refreshing.REQUEST.unlink(missing_ok=True)
+    refreshing.FAILED.touch()
+    waiting = refreshing.WAITING.read_text().strip() if refreshing.WAITING.exists() else ""
+    return [REFRESH_FAILED + (f" The sender's reason, to pass on: {waiting}" if waiting else "")]
+
+
+def is_sender_running() -> bool:
+    """Whether scripts/send-clear still runs. Its process ID could have gone to another program after a crash."""
+    if not SENDER_PID.exists():
+        return False
+    command = subprocess.run(
+        ["ps", "-o", "command=", "-p", SENDER_PID.read_text().strip()], capture_output=True, text=True, check=False
+    ).stdout
+    return "send-clear" in command
 
 
 def check_pull_requests(state: dict) -> list[str]:

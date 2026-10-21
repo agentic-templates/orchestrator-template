@@ -1,0 +1,198 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Types /clear into the orchestrator's terminal once its session is idle, then "Continue the loop.".
+
+usage: scripts/send-clear
+
+The Stop hook starts it once the orchestrator has requested a refresh with scripts/refresh --ready, and
+scripts/watch starts it again if the refresh hasn't happened. It types only into the tmux pane that the
+orchestrator's session started in, and only while no turn runs and no dialog shows. It waits while:
+
+- the maintainer wrote to the orchestrator in the last few minutes, until the orchestrator's context grows past
+  the point where it refreshes even then
+- the maintainer has text typed in the box. Text left unchanged for a while counts as abandoned. The sender
+  moves it to .loop/unsent/ with Ctrl+G and scripts/editor, and the new session never sees it. If Ctrl+G leaves
+  the text in the box, the sender deletes it.
+
+It tells whether a turn is running from the transcript as well as the screen, because Claude Code hides its
+spinner while it writes a long answer.
+
+It writes what it waits for to .loop/refresh-waiting, and stops when a tool call after the request cancels the
+refresh. If it can't type into the terminal, it says why in .loop/refresh-waiting and stops.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import contexts
+import refreshing
+import terminal
+import thresholds
+import usage
+import watching
+
+PID = usage.LOOP / "send-clear.pid"
+TYPED = usage.LOOP / "refresh-typed.json"
+CHECK_SECONDS = 10
+# Text in the box that stays the same this long was left there, rather than being written.
+ABANDONED_SECONDS = 120
+# How long the new session may take to start and become idle after /clear.
+START_SECONDS = 60
+
+
+class CantSend(Exception):
+    """The sender can't type into the orchestrator's terminal, for the reason it gives."""
+
+
+def tmux(*args: str) -> str:
+    result = subprocess.run(["tmux", *args], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise CantSend(f"tmux {args[0]} failed: {result.stderr.strip()}")
+    return result.stdout
+
+
+def screen(pane: str) -> terminal.Screen:
+    return terminal.read(tmux("capture-pane", "-p", "-e", "-t", pane))
+
+
+def type_text(pane: str, text: str) -> None:
+    tmux("send-keys", "-t", pane, "-l", text)
+
+
+def press(pane: str, *keys: str) -> None:
+    tmux("send-keys", "-t", pane, *keys)
+
+
+def wait_for(reason: str) -> None:
+    refreshing.WAITING.write_text(reason + "\n")
+    time.sleep(CHECK_SECONDS)
+
+
+def maintainer_is_writing() -> bool:
+    """Whether the maintainer wrote within the last few minutes, while the context is still below the point where
+    the orchestrator refreshes even then."""
+    if usage.minutes_since_maintainer_wrote() >= watching.ACTIVE_MINUTES:
+        return False
+    orchestrator = usage.orchestrator()
+    context = contexts.load(watching.CONTEXTS).get(str(orchestrator.get("transcript")))
+    if context is None or context.start is None:
+        return True
+    limits = watching.context_limits(context.model, orchestrator.get("window"))
+    return context.current < thresholds.compute(limits, context.start, context.growth()).while_active
+
+
+def is_abandoned(text: str) -> bool:
+    """Whether the box has shown the same text for long enough. The time counts across senders."""
+    typed = json.loads(TYPED.read_text()) if TYPED.exists() else {}
+    if typed.get("text") != text:
+        typed = {"text": text, "since": time.time()}
+        TYPED.write_text(json.dumps(typed))
+    return time.time() - typed["since"] >= ABANDONED_SECONDS
+
+
+def take_text(pane: str) -> None:
+    """Moves the box's text to .loop/unsent/ through the editor that Ctrl+G opens, or deletes it if that fails."""
+    taking = usage.LOOP / "taking-input"
+    taking.touch()
+    try:
+        press(pane, "C-g")
+        time.sleep(3)
+    finally:
+        taking.unlink(missing_ok=True)
+    if screen(pane).box:
+        # The maintainer chose losing the text here over stalling the refresh: it's rare, and usually forgotten.
+        # Ctrl+C would clear the box too, but on an empty box it starts to quit Claude Code.
+        press(pane, "-N", "2000", "BSpace")
+        time.sleep(1)
+    if screen(pane).box:
+        raise CantSend("text in the input box couldn't be taken out of it. Empty the input box by hand")
+    TYPED.unlink(missing_ok=True)
+
+
+def is_busy(shown: terminal.Screen) -> bool:
+    transcript = usage.orchestrator().get("transcript")
+    return shown.is_busy or bool(transcript and refreshing.turn_running(Path(transcript)))
+
+
+def is_ready(pane: str) -> bool:
+    """Whether the session is idle with an empty box, waiting for the reason when it isn't."""
+    shown = screen(pane)
+    if is_busy(shown):
+        wait_for("a turn is running")
+    elif shown.box is None:
+        wait_for("a dialog is open")
+    elif maintainer_is_writing():
+        wait_for("the maintainer wrote to the orchestrator in the last few minutes")
+    elif shown.box and not is_abandoned(shown.box):
+        wait_for("the maintainer has text in the input box")
+    elif shown.box:
+        take_text(pane)
+        return False
+    else:
+        return True
+    return False
+
+
+def send(pane: str, text: str) -> bool:
+    """Types the text and presses Enter, if the box shows exactly that text and the session is still idle."""
+    type_text(pane, text)
+    time.sleep(1)
+    shown = screen(pane)
+    if shown.box != text or is_busy(shown):
+        press(pane, "-N", str(len(text)), "BSpace")
+        return False
+    press(pane, "Enter")
+    return True
+
+
+def clear(pane: str) -> None:
+    while (saved := refreshing.load_request()) and not refreshing.is_cancelled(saved):
+        if is_ready(pane) and send(pane, "/clear"):
+            break
+    else:
+        return
+    # The new session's start hook removes the request. A notice that waited can start a turn of its own.
+    deadline = time.time() + START_SECONDS
+    while time.time() < deadline:
+        time.sleep(2)
+        shown = screen(pane)
+        if not refreshing.REQUEST.exists() and is_busy(shown):
+            return
+        if not refreshing.REQUEST.exists() and shown.box == "" and send(pane, "Continue the loop."):
+            return
+    if refreshing.REQUEST.exists():
+        raise CantSend("/clear didn't start a new session within a minute")
+    raise CantSend('the new session started, but "Continue the loop." couldn\'t be typed into it')
+
+
+def main() -> int:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+    if PID.exists() and usage.is_running(int(PID.read_text())):
+        return 0
+    PID.write_text(str(os.getpid()))
+    try:
+        pane = usage.orchestrator().get("pane")
+        if not pane:
+            raise CantSend(
+                "the orchestrator doesn't run in tmux. The maintainer has to start it again with scripts/orchestrate"
+            )
+        clear(pane)
+        refreshing.WAITING.unlink(missing_ok=True)
+    except CantSend as error:
+        refreshing.WAITING.write_text(f"can't send /clear: {error}\n")
+        return 1
+    finally:
+        PID.unlink(missing_ok=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

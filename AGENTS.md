@@ -2,7 +2,7 @@
 
 ## What this project is
 
-orchestrator-template gives a new GitHub project an orchestrator: one agent that the maintainer talks to in plain words. The orchestrator turns the maintainer's goals into issues, builds them with agents that work in parallel, and lets GitHub merge their pull requests once the checks pass. It keeps working through usage limits and the compaction of its context, and it improves its own rules and checks from what it measures. The project aims for code that stays easy to read and change after hundreds of agent changes, and for rules that stay few because hooks, checks and settings enforce them. It works with any language and with Claude Code or Codex.
+orchestrator-template gives a new GitHub project an orchestrator: one agent that the maintainer talks to in plain words. The orchestrator turns the maintainer's goals into issues, builds them with agents that work in parallel, and lets GitHub merge their pull requests once the checks pass. It keeps working through usage limits and refreshes of its context, and it improves its own rules and checks from what it measures. The project aims for code that stays easy to read and change after hundreds of agent changes, and for rules that stay few because hooks, checks and settings enforce them. It works with any language and with Claude Code or Codex.
 
 When a request doesn't fit this direction, say so, and ask the maintainer whether to change the request or the direction.
 

@@ -16,7 +16,7 @@ import usage
 def record_orchestrator(account: str, status: dict) -> None:
     """Saves where the orchestrator's transcript is and how big its context window is, for scripts/watch."""
     orchestrator = usage.orchestrator()
-    if orchestrator.get("account") != account:
+    if orchestrator.get("account") != account or usage.orchestrator_elsewhere():
         return
     window = (status.get("context_window") or {}).get("context_window_size")
     update = {"transcript": status.get("transcript_path"), "window": window}

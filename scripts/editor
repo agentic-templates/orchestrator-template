@@ -1,0 +1,43 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""The orchestrator's editor for Ctrl+G, which scripts/orchestrate sets as EDITOR and VISUAL.
+
+usage: scripts/editor <file>
+
+While scripts/send-clear takes text that was typed into the orchestrator's input box but never sent, it moves
+the text to .loop/unsent/ and leaves the file empty, so that the box comes back empty. Otherwise it opens the
+file in the editor that LOOP_EDITOR names, which scripts/orchestrate sets to the maintainer's own.
+"""
+
+import os
+import shlex
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import usage
+
+TAKING_INPUT = usage.LOOP / "taking-input"
+UNSENT = usage.LOOP / "unsent"
+
+
+def main() -> int:
+    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return 0 if len(sys.argv) == 2 else 2
+    path = Path(sys.argv[1])
+    if not TAKING_INPUT.exists():
+        editor = shlex.split(os.environ.get("LOOP_EDITOR") or "vi")
+        os.execvp(editor[0], [*editor, str(path)])
+    if text := path.read_text().strip():
+        UNSENT.mkdir(parents=True, exist_ok=True)
+        (UNSENT / f"{time.strftime('%Y-%m-%d-%H%M%S')}.txt").write_text(text + "\n")
+    path.write_text("")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

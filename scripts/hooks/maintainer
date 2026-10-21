@@ -20,7 +20,7 @@ import usage
 
 def main() -> None:
     prompt = json.load(sys.stdin).get("prompt", "")
-    if not prompt.lstrip().startswith("<"):
+    if not prompt.lstrip().startswith("<") and not usage.orchestrator_elsewhere():
         usage.LOOP.mkdir(exist_ok=True)
         usage.MAINTAINER.write_text(json.dumps({"last_message": time.time()}))
 

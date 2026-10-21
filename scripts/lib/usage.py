@@ -249,6 +249,23 @@ def orchestrator() -> dict:
     return json.loads(ORCHESTRATOR.read_text()) if ORCHESTRATOR.exists() else {}
 
 
+def this_session() -> int | None:
+    """The process ID of the Claude Code session that runs this script, which Claude Code passes to its hooks."""
+    value = os.environ.get("CLAUDE_PID")
+    return int(value) if value else None
+
+
+def orchestrator_elsewhere() -> int | None:
+    """The process ID of an orchestrator that runs in another session of this checkout, if one does. A second
+    session started in the main checkout would otherwise take over its records and its notices."""
+    recorded = orchestrator().get("pid")
+    return recorded if runs_elsewhere(recorded, this_session()) else None
+
+
+def runs_elsewhere(recorded: int | None, mine: int | None) -> bool:
+    return bool(recorded) and recorded != mine and is_running(recorded)
+
+
 def minutes_since_maintainer_wrote() -> float:
     if not MAINTAINER.exists():
         return float("inf")

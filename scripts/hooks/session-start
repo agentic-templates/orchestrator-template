@@ -6,10 +6,12 @@
 
 usage: scripts/hooks/session-start skills <provider>
        scripts/hooks/session-start state
+       scripts/hooks/session-start status
 
 It runs at startup, on resume, after /clear and after compaction. It does nothing in a session of another
 agent type, such as a builder that scripts/launch started. A hook can inject at most 10,000 characters, so
-the skills and the state come from two separate hooks.
+the skills, the state and the status come from separate hooks. A new session also drops the refresh that the
+session before it requested.
 """
 
 import json
@@ -20,10 +22,29 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+import refreshing
 import usage
 
 STATE = ROOT / ".loop" / "state.md"
 MAX_CHARACTERS = 10_000
+# scripts/orchestrate sets LOOP_ORCHESTRATE. Without it, the session runs outside tmux or inside the sandbox.
+NOT_ORCHESTRATED = (
+    "This orchestrator wasn't started with scripts/orchestrate, so refreshing its context or starting agents may "
+    "fail. Quit it, and start it again with scripts/orchestrate."
+)
+NOT_ORCHESTRATED_CONTEXT = (
+    "You weren't started with scripts/orchestrate, so refreshes and agent launches may fail. Tell the maintainer "
+    "to start you again with scripts/orchestrate, and start no agents until then."
+)
+ANOTHER = (
+    "Another orchestrator runs in this checkout, as process {pid}, so this session isn't the orchestrator. Tell the "
+    "maintainer to quit this session, and to open sessions for work of their own in another folder."
+)
+LONG_STATES_TO_REPORT = 2
+LONG_STATE_NOTE = (
+    "Your saved state was long at the last two refreshes. Send the maintainer a notification saying so, without "
+    "quoting it, so that they can look at .loop/state.md."
+)
 
 
 def skill(name: str) -> str:
@@ -32,31 +53,63 @@ def skill(name: str) -> str:
 
 
 def take_over(provider: str) -> None:
-    """Records the orchestrator's account."""
+    """Records the orchestrator's account, and the tmux pane that scripts/send-clear types /clear into."""
     usage.LOOP.mkdir(exist_ok=True)
-    usage.ORCHESTRATOR.write_text(json.dumps({"account": usage.account_of(dict(os.environ), provider)}))
+    account = usage.account_of(dict(os.environ), provider)
+    record = {"account": account, "pane": os.environ.get("TMUX_PANE"), "pid": usage.this_session()}
+    usage.ORCHESTRATOR.write_text(json.dumps(record))
+    refreshing.clear()
 
 
 def state() -> str:
-    saved = STATE.read_text().strip() if STATE.exists() else "No saved state. This is the loop's first session."
-    status = subprocess.run(
+    if not STATE.exists():
+        return "No saved state in .loop/state.md. This is the loop's first session."
+    long_note = ""
+    if refreshing.LONG_STATES.exists() and int(refreshing.LONG_STATES.read_text()) >= LONG_STATES_TO_REPORT:
+        refreshing.LONG_STATES.unlink()
+        long_note = LONG_STATE_NOTE + "\n\n"
+    saved = STATE.read_text().strip()
+    heading = "# Your saved state (.loop/state.md)\n\n"
+    if len(heading) + len(saved) > MAX_CHARACTERS:
+        cut = "\n\n[This is the first part of .loop/state.md. Read the rest of the file.]"
+        saved = saved[: MAX_CHARACTERS - len(heading) - len(cut)] + cut
+    return long_note + heading + saved
+
+
+def status() -> str:
+    result = subprocess.run(
         [str(ROOT / "scripts" / "status"), "--save"], capture_output=True, text=True, check=False, cwd=ROOT
     )
-    return f"# Your saved state (.loop/state.md)\n\n{saved}\n\n# The loop's status\n\n{status.stdout or status.stderr}"
+    return f"# The loop's status\n\n{result.stdout or result.stderr}"
+
+
+def respond(context: str, message: str | None = None) -> None:
+    """Gives the model the context, and shows the maintainer the message, if any."""
+    if len(context) > MAX_CHARACTERS:
+        context = context[: MAX_CHARACTERS - 100] + "\n\n[Cut here. Run scripts/status for the rest.]"
+    output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
+    print(json.dumps(output | ({"systemMessage": message} if message else {})))
 
 
 def main() -> None:
     event = json.load(sys.stdin)
     if event.get("agent_type") not in (None, "orchestrator"):
         return
+    if other := usage.orchestrator_elsewhere():
+        if sys.argv[1] == "skills":
+            respond(ANOTHER.format(pid=other))
+        return
     if sys.argv[1] == "skills":
         take_over(sys.argv[2])
         context = skill("orchestrator") + "\n\n" + skill(f"orchestrator-{sys.argv[2]}")
-    else:
+        if not os.environ.get("LOOP_ORCHESTRATE"):
+            respond(NOT_ORCHESTRATED_CONTEXT + "\n\n" + context, NOT_ORCHESTRATED)
+            return
+    elif sys.argv[1] == "state":
         context = state()
-    if len(context) > MAX_CHARACTERS:
-        context = context[: MAX_CHARACTERS - 100] + "\n\n[Cut here. Run scripts/status for the rest.]"
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}))
+    else:
+        context = status()
+    respond(context)
 
 
 if __name__ == "__main__":
