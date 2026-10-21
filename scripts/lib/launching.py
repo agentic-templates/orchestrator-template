@@ -6,11 +6,12 @@ import select
 import subprocess
 import sys
 import time
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import measurements
+import meter
+import metering
 import usage
 
 ROOT = usage.ROOT
@@ -37,8 +38,31 @@ def git(*args: str, cwd: Path = ROOT) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def make_worktree(agent_id: str, branch: str | None) -> Path:
-    """A worktree at the latest main, or on an existing branch for a successor."""
+def choose_account(
+    decisions: dict[str, meter.Decision], accounts: list[usage.Account], requested: str | None, force: bool
+) -> tuple[usage.Account | None, str]:
+    """The account to start an agent on: the one requested if the meter gives it room, or else the one the meter
+    names. Without one, the reason why the agent can't start."""
+    name = requested or metering.next_account(decisions, accounts)
+    if name is None:
+        return None, "No account has room for an agent now.\n\n" + metering.report(decisions, accounts)
+    account = next((a for a in accounts if a.name == name), None)
+    if account is None:
+        return None, f"No account is called {name}. .loop/accounts.json lists the accounts."
+    if account.provider not in metering.LAUNCHABLE_PROVIDERS:
+        return None, f"{name} is a {account.provider} account, and scripts/launch can't start agents there yet."
+    if not decisions[name].room and not force:
+        return None, (
+            f"The meter gives {name} no room for an agent now. Run this again without --account to start on the "
+            f"account it names.\n\n{metering.report(decisions, accounts)}"
+        )
+    return account, ""
+
+
+def make_worktree(agent_id: str, branch: str | None = None, continues: bool = False) -> Path:
+    """A worktree at the latest main, detached or on a new branch, or with `continues`, on the branch as it was
+    pushed. The launcher records the branch's upstream, because the sandbox doesn't let the agent write
+    .git/config."""
     path = WORKTREES / agent_id
     git("fetch", "--quiet", "origin")
     if branch is None:
@@ -47,22 +71,31 @@ def make_worktree(agent_id: str, branch: str | None) -> Path:
     for line in git("worktree", "list", "--porcelain").split("\n\n"):
         if f"branch refs/heads/{branch}" in line:
             git("worktree", "remove", "--force", line.splitlines()[0].removeprefix("worktree "))
-    git("worktree", "add", "--quiet", "-B", branch, str(path), f"origin/{branch}")
+    start = f"origin/{branch}" if continues else "origin/main"
+    git("worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
+    git("config", f"branch.{branch}.remote", "origin")
+    git("config", f"branch.{branch}.merge", f"refs/heads/{branch}")
     return path
 
 
 def settings() -> str:
-    """The project's permissions, given again on the command line. A headless session loads the project's own
-    settings from its worktree, but ignores their allow rules in a folder its account hasn't trusted."""
+    """The project's permissions and sandbox, given again on the command line. A headless session loads the
+    project's own settings from its worktree, but ignores their allow rules in a folder its account hasn't
+    trusted."""
     project = json.loads((ROOT / ".claude" / "settings.json").read_text())
-    return json.dumps({"permissions": project["permissions"]})
+    return json.dumps({"permissions": project["permissions"], "sandbox": project["sandbox"]})
+
+
+def transcript_path(account: usage.Account, worktree: Path, session_id: str) -> Path:
+    home = Path(usage.environment_for(account).get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
+    return home / "projects" / str(worktree).replace("/", "-").replace(".", "-") / f"{session_id}.jsonl"
 
 
 def start(
-    account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str, resume: str | None = None
+    account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str, session_id: str
 ) -> Session:
-    """Starts the agent, or with `resume`, continues the session of that ID with its whole context."""
-    session_id = resume or str(uuid.uuid4())
+    """Starts the agent's session, or continues it with its whole context if it has run before."""
+    transcript = transcript_path(account, worktree, session_id)
     input_path = usage.AGENTS / f"{agent_id}.input"
     usage.AGENTS.mkdir(parents=True, exist_ok=True)
     input_path.unlink(missing_ok=True)
@@ -73,13 +106,11 @@ def start(
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
         "--verbose", "--settings", settings(), "--name", agent_id,
-        *(["--resume", session_id] if resume else ["--session-id", session_id]),
+        *(["--resume", session_id] if transcript.exists() else ["--session-id", session_id]),
     ]  # fmt: skip
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
-    home = Path(environment.get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
-    transcript = home / "projects" / str(worktree).replace("/", "-").replace(".", "-") / f"{session_id}.jsonl"
     session = Session(agent_id, session_id, account.name, worktree, process, input_path, transcript)
     send(input_path, prompt)
     return session

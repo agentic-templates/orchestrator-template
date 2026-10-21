@@ -30,8 +30,8 @@ PRICE_STEPS = {"claude-haiku": (100_000, 5.0)}
 HAND_OFF = (
     "Hand off soon: your context has grown past the point where a fresh builder usually costs less. Keep going "
     "until you reach a point where a successor wouldn't have to reread what you've loaded for the step you're on. "
-    "If the rest of your issue needs little more reading, finish it instead. Then push your branch, write "
-    ".loop/handoff/issue-<number>.md as the building skill describes, and end with your report."
+    "If the rest of your issue needs little more reading, finish it instead. Otherwise, hand off to a successor as "
+    "the building skill describes."
 )
 HAND_OFF_NOW = (
     "Hand off now: your context is close to its limit. Do the hand-off as soon as the step you're on is done."

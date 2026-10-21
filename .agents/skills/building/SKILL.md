@@ -5,14 +5,13 @@ description: How a builder agent turns one issue into a pull request. Builders p
 
 # Building
 
-The orchestrator gives you the number of one issue.
+The orchestrator gives you the number of one issue, with its branch `issue-<number>` checked out.
 
 1. Read the issue with `gh issue view <number> --comments`, and the answers of any research issue that blocks it.
-2. Run `git switch -c issue-<number> origin/main`.
-3. Make the change as "Make a change" in AGENTS.md describes, until it meets "Definition of done".
-4. End with a short report: the pull request's link, any problem you noticed outside the issue, and anything you couldn't do.
+2. Make the change as "Make a change" in AGENTS.md describes, until it meets "Definition of done".
+3. End with a short report: the pull request's link, any problem you noticed outside the issue, and anything you couldn't do.
 
-If you continue from a hand-off, your branch is already checked out. Read `git log`, and skip step 2.
+If you continue from a hand-off, read `git log` first to see what the builder before you committed.
 
 ## Hand off to a successor
 

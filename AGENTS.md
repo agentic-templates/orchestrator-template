@@ -48,7 +48,7 @@ The skills in `.agents/skills/` hold the rules for each kind of work. Read a ski
 1. Work on one issue, on a branch of its own.
 2. While you work, run only the tests of the code you change. Run `scripts/check` once, when the change is done, and fix what your change broke.
 3. Leave problems outside your issue alone, and list them in your report. Only the orchestrator opens issues.
-4. Open a pull request with `gh pr create`. Its body starts with `Closes #<issue>`. Auto-merge turns on by itself in Claude Code. Elsewhere, run `gh pr merge --auto --squash <number>`. GitHub merges the pull request once its checks pass, so don't wait for them.
+4. Open a pull request with `gh pr create`. Its body starts with `Closes #<issue>`. Auto-merge turns on by itself, and GitHub merges the pull request once its checks pass, so don't wait for them.
 
 ## Pull request titles
 
