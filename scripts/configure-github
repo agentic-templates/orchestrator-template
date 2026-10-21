@@ -6,10 +6,12 @@
 
 usage: scripts/configure-github
 
-Run it once after you create a repository from the template. Running it again resets every setting below,
-and deletes each label that it doesn't list. It needs admin access to the repository.
+Run it once after you create a repository from the template. Running it again resets every setting below. Of the
+labels GitHub gives a new repository, it deletes those that neither the loop nor any issue or pull request uses, and
+it leaves other labels alone. It needs admin access to the repository.
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -26,6 +28,12 @@ LABELS = {
     "needs-triage": ("fbca04", "Opened by someone outside the project, and not judged yet"),
     "dependencies": ("0366d6", "Dependabot's version updates"),
 }
+
+# The labels GitHub gives a new repository. Others are the project's own, so they're kept.
+GITHUB_DEFAULT_LABELS = {
+    "bug", "documentation", "duplicate", "enhancement", "good first issue", "help wanted", "invalid", "question",
+    "wontfix",
+}  # fmt: skip
 
 # GitHub Actions' app ID, so that only a workflow can report the required checks.
 ACTIONS_APP = 15368
@@ -83,6 +91,18 @@ RULESET = {
             },
         },
     ],
+}
+
+# An agent that force-pushes by mistake could otherwise overwrite another agent's pushed work. Creating a
+# branch, pushing on top of it and deleting it stay allowed, so builders can push new branches, and GitHub can
+# delete a branch when its pull request merges.
+ISSUE_BRANCHES = {
+    "name": "issue branches",
+    "target": "branch",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "conditions": {"ref_name": {"include": ["refs/heads/issue-*"], "exclude": []}},
+    "rules": [{"type": "non_fast_forward"}],
 }
 
 
@@ -166,27 +186,36 @@ def configure_labels(repo: str) -> None:
         gh("label", "create", name, "--repo", repo, "--force", "--color", color, "--description", description)
     current = json.loads(gh("label", "list", "--repo", repo, "--limit", "200", "--json", "name"))
     for label in current:
-        if label["name"] not in LABELS:
+        if label["name"] in GITHUB_DEFAULT_LABELS - LABELS.keys() and not is_used(repo, label["name"]):
             gh("label", "delete", label["name"], "--repo", repo, "--yes")
 
 
-def configure_main(repo: str) -> None:
+def is_used(repo: str, label: str) -> bool:
+    """Whether any issue or pull request has the label, which a project may have chosen to use."""
+    query = f'repo:{repo} label:"{label}"'
+    return int(gh("api", "-X", "GET", "search/issues", "-f", f"q={query}", "--jq", ".total_count")) > 0
+
+
+def configure_rulesets(repo: str) -> None:
     print("Main: changes arrive through pull requests that pass the checks, and merge through the merge queue")
-    rulesets = json.loads(api("GET", f"repos/{repo}/rulesets?includes_parents=false"))
-    existing = [ruleset["id"] for ruleset in rulesets if ruleset["name"] == RULESET["name"]]
-    if existing:
-        api("PUT", f"repos/{repo}/rulesets/{existing[0]}", RULESET)
-    else:
-        api("POST", f"repos/{repo}/rulesets", RULESET)
+    print("Issue branches: nobody can overwrite pushed work with a force push")
+    current = json.loads(api("GET", f"repos/{repo}/rulesets?includes_parents=false"))
+    for ruleset in (RULESET, ISSUE_BRANCHES):
+        existing = [item["id"] for item in current if item["name"] == ruleset["name"]]
+        if existing:
+            api("PUT", f"repos/{repo}/rulesets/{existing[0]}", ruleset)
+        else:
+            api("POST", f"repos/{repo}/rulesets", ruleset)
 
 
 def main() -> None:
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     repo = gh("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
     check_repository(repo)
     configure_merging(repo)
     configure_security(repo)
     configure_labels(repo)
-    configure_main(repo)
+    configure_rulesets(repo)
     print(f"Turn on Dependabot malware alerts at https://github.com/{repo}/settings/security_analysis yourself,")
     print("because GitHub gives scripts no way to turn them on.")
 
