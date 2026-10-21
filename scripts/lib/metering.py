@@ -13,7 +13,9 @@ CHECK_SECONDS = 60
 # account's reading is replaced once it's too old for an agent to start on.
 STALE_BUSY_SECONDS = 5 * 60
 STALE_IDLE_SECONDS = meter.STALE_MINUTES * 60
-# The providers whose agents scripts/launch can start.
+# The providers whose agents scripts/launch can start. Add one only once the launcher can start its agents: for an
+# account of any other provider, it would start a Claude agent on the orchestrator's account, and the meter would
+# count that agent's usage against the wrong account.
 LAUNCHABLE_PROVIDERS = {"claude"}
 # Percent of a window kept back on the orchestrator's account, so that it can still coordinate the other
 # accounts while its own fills up.
