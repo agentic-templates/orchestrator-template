@@ -7,11 +7,13 @@
 usage: scripts/new-issue --title <title> --body-file <file> [--label <label>]... [--milestone <title>] [--new]
 
 Without --new, it lists the open and closed issues whose titles share words with the new one, and stops if
-there are any. If none of them covers the change, run it again with --new. It checks the body's sections and prose first,
-and prints the new issue's link.
+there are any. If none of them covers the change, run it again with --new. It checks the body's sections and prose
+first, and prints the new issue's link. Only the orchestrator opens issues, so it refuses in an agent that
+scripts/launch started.
 """
 
 import argparse
+import os
 import re
 import sys
 from pathlib import Path
@@ -49,6 +51,9 @@ def main() -> int:
     parser.add_argument("--milestone")
     parser.add_argument("--new", action="store_true", help="open it even though similar issues exist")
     arguments = parser.parse_args()
+    if os.environ.get("LOOP_AGENT_ID"):
+        print("Only the orchestrator opens issues. Put the problem in your report instead, and it decides.")
+        return 1
     body = Path(arguments.body_file).read_text()
     problems = issues.check_body(body) + [
         f"Line {p.line}: {p.message}" for p in prose.check(body + "\n" + arguments.title)

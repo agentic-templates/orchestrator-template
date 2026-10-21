@@ -34,6 +34,7 @@
   },
   "sandbox": {
     "enabled": true,
+    "enableWeakerNetworkIsolation": true,
     "excludedCommands": [
       "gh *",
       "git push *",

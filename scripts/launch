@@ -9,10 +9,11 @@ usage: scripts/launch <agent type> <issue or pull request> [--account <name>] [-
 
 Run it in the background: its exit wakes the orchestrator. The agent runs as a headless session of its own, so
 that the orchestrator's refreshes and crashes don't touch it, and scripts/message can still reach it while it
-works. Without --account, it starts on the account that scripts/meter names.
+works. It starts on the account that scripts/meter names, or on the one --account names if the meter gives that
+account room.
 
-- A builder gets the issue's number. With --successor, it continues the issue from the hand-off note that the
-  builder before it wrote, on the same branch.
+- A builder gets the issue's number, and its branch issue-<number> already checked out. With --successor, it
+  continues the issue from the hand-off note that the builder before it wrote, on the same branch.
 - A reviewer gets the pull request's number, and --second-review for its second review.
 - A researcher gets the research issue's number.
 - With --resume, an agent that has stopped continues its own session, with its whole context, from the message,
@@ -63,6 +64,7 @@ def parse() -> argparse.Namespace:
     parser.add_argument("--account")
     parser.add_argument("--second-review", action="store_true")
     parser.add_argument("--successor", action="store_true")
+    parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--resume", metavar="AGENT_ID")
     parser.add_argument("--message")
     arguments = parser.parse_args()
@@ -78,7 +80,7 @@ def resume(arguments: argparse.Namespace) -> int:
     account = next(a for a in usage.accounts() if a.name == record["account"])
     worktree = Path(record["worktree"])
     if not worktree.exists():
-        worktree = launching.make_worktree(record["id"], f"issue-{record['number']}")
+        worktree = launching.make_worktree(record["id"], f"issue-{record['number']}", continues=True)
     session = launching.start(account, record["name"], record["id"], worktree, arguments.message, record["session"])
     return run(session, {**record, "started": time.time(), "pid": os.getpid(), "worktree": str(worktree)})
 
@@ -96,27 +98,31 @@ def main() -> int:
     arguments = parse()
     if arguments.resume:
         return resume(arguments)
-    name = arguments.account or metering.next_account(metering.decisions())
-    account = next((a for a in usage.accounts() if a.name == name), None)
+    decisions = metering.decisions()
+    account, reason = launching.choose_account(decisions, usage.accounts(), arguments.account, arguments.force)
     if account is None:
-        print("No account has room for an agent now. scripts/meter says why.")
+        print(reason)
         return 2
     agent_id = f"{arguments.agent_type}-{arguments.number}-{uuid.uuid4().hex[:6]}"
-    branch = f"issue-{arguments.number}" if arguments.successor else None
-    worktree = launching.make_worktree(agent_id, branch)
-    session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments))
+    session_id = str(uuid.uuid4())
+    worktree = launching.WORKTREES / agent_id
     record = {
         "id": agent_id,
         "name": arguments.agent_type,
         "config": usage.agent_config(arguments.agent_type),
         "account": account.name,
         "number": arguments.number,
-        "session": session.session_id,
+        "session": session_id,
         "started": time.time(),
         "pid": os.getpid(),
         "worktree": str(worktree),
-        "transcript": str(session.transcript),
+        "transcript": str(launching.transcript_path(account, worktree, session_id)),
     }
+    # Saved before the agent starts, so that the meter counts it for a launch that comes right after this one.
+    usage.save_agent(record)
+    branch = f"issue-{arguments.number}" if arguments.agent_type.startswith("builder") else None
+    launching.make_worktree(agent_id, branch, continues=arguments.successor)
+    session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments), session_id)
     return run(session, record)
 
 
