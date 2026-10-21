@@ -249,12 +249,25 @@ def orchestrator_account() -> str | None:
     return orchestrator().get("account")
 
 
-def agent_config(agent_type: str) -> str:
-    """The model and effort that an agent type runs with, such as "opus/medium", from its definition."""
+def agent_fields(agent_type: str) -> dict[str, str]:
+    """The fields at the top of an agent type's definition in .claude/agents/, such as its model."""
     path = ROOT / ".claude" / "agents" / f"{agent_type}.md"
     fields = {}
     if path.exists():
         for line in path.read_text().split("---")[1].splitlines():
             key, _, value = line.partition(":")
             fields[key.strip()] = value.strip()
+    return fields
+
+
+def agent_config(agent_type: str) -> str:
+    """The model and effort that an agent type runs with, such as "opus/medium", from its definition."""
+    fields = agent_fields(agent_type)
     return f"{fields.get('model', 'default')}/{fields.get('effort', 'default')}"
+
+
+def agent_skills(agent_type: str) -> list[str]:
+    """The skills that an agent type preloads, from its definition."""
+    return [
+        skill.strip() for skill in agent_fields(agent_type).get("skills", "").strip("[]").split(",") if skill.strip()
+    ]

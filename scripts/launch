@@ -12,8 +12,9 @@ that the orchestrator's refreshes and crashes don't touch it, and scripts/messag
 works. It starts on the account that scripts/meter names, or on the one --account names if the meter gives that
 account room.
 
-- A builder gets the issue's number, and its branch issue-<number> already checked out. With --successor, it
-  continues the issue from the hand-off note that the builder before it wrote, on the same branch.
+- A builder, which is any agent type that preloads the building skill, gets the issue's number and its branch
+  issue-<number> checked out. With --successor, it continues the issue from the hand-off note that the builder
+  before it wrote, on the same branch.
 - A reviewer gets the pull request's number, and --second-review for its second review.
 - A researcher gets the research issue's number.
 - With --resume, an agent that has stopped continues its own session, with its whole context, from the message,
@@ -120,7 +121,8 @@ def main() -> int:
     }
     # Saved before the agent starts, so that the meter counts it for a launch that comes right after this one.
     usage.save_agent(record)
-    branch = f"issue-{arguments.number}" if arguments.agent_type.startswith("builder") else None
+    builds = "building" in usage.agent_skills(arguments.agent_type)
+    branch = f"issue-{arguments.number}" if builds else None
     launching.make_worktree(agent_id, branch, continues=arguments.successor)
     session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments), session_id)
     return run(session, record)
