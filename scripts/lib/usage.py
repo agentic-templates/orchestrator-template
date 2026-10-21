@@ -116,14 +116,20 @@ def record_status_line(account: str, status: dict) -> None:
 def probe(account: Account) -> None:
     """Takes a fresh reading of the account: a one-turn Haiku run for Claude, and a usage request for Codex."""
     if account.provider == "claude":
-        output = subprocess.run(
-            ["claude", "-p", "--model", "haiku", "--output-format", "stream-json", "--verbose", "Reply with ok."],
-            env=environment_for(account),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        ).stdout
+        try:
+            output = subprocess.run(
+                ["claude", "-p", "--model", "haiku", "--output-format", "stream-json", "--verbose", "Reply with ok."],
+                env=environment_for(account),
+                # claude -p adds whatever comes on its input to the prompt, and waits for it to end.
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            ).stdout
+        except subprocess.TimeoutExpired:
+            # The meter projects the last reading forward instead, which slows the loop down until a probe works.
+            return
         for line in output.splitlines():
             event = json.loads(line) if line.startswith("{") else {}
             if event.get("type") == "rate_limit_event":
