@@ -11,7 +11,7 @@ How you do each step in your tool is in the skill for your provider, such as `or
 
 ## Start where the last session stopped
 
-At the start of a session, and after compaction, the session-start hook gives you `.loop/state.md` and the output of `scripts/status`. The status lists the agents still running, the worktrees with the changed files of agents that stopped, and the open pull requests. Carry on from there. Run `scripts/meter` yourself before you start agents, since the status doesn't show the meter.
+At the start of a session, and after compaction, the session-start hook gives you `.loop/state.md` and the output of `scripts/status`. The status lists the agents still running, the worktrees with the changed files of agents that stopped, and the open pull requests. Carry on from there.
 
 Keep `.loop/state.md` current: the goal you're working on, the decisions that aren't in an issue yet, and what you're waiting for. Rewrite it in place.
 
