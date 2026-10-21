@@ -66,6 +66,14 @@ def expand(home: str | None) -> str | None:
     return None if home is None else os.path.realpath(os.path.expanduser(home))
 
 
+def command_for(account: Account, command: list[str]) -> list[str]:
+    """The command, run on the account whatever environment it starts in, such as a tmux server's, which can come
+    from a shell on another account."""
+    variable = "CLAUDE_CONFIG_DIR" if account.provider == "claude" else "CODEX_HOME"
+    home = [f"{variable}={os.path.expanduser(account.home)}"] if account.home else []
+    return ["env", "-u", variable, *home, *command]
+
+
 def environment_for(account: Account) -> dict[str, str]:
     environment = dict(os.environ)
     variable = "CLAUDE_CONFIG_DIR" if account.provider == "claude" else "CODEX_HOME"
