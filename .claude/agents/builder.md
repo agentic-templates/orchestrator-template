@@ -3,7 +3,6 @@ name: builder
 description: Builds one ready issue that has no size label into a pull request in its own worktree. Most issues are of this kind.
 model: opus
 effort: medium
-isolation: worktree
 skills: [building, code, writing]
 ---
 

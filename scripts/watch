@@ -19,6 +19,7 @@ It also exits after 50 minutes, so that the orchestrator's prompt cache, which l
 """
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -43,6 +44,14 @@ def check(state: dict, actions: dict[str, str]) -> list[str]:
 
 
 def main() -> int:
+    watching.PID.write_text(str(os.getpid()))
+    try:
+        return watch()
+    finally:
+        watching.PID.unlink(missing_ok=True)
+
+
+def watch() -> int:
     started = time.time()
     state = watching.load_state()
     actions = {name: d.action for name, d in metering.decisions().items()}

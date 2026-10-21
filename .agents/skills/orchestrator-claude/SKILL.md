@@ -5,8 +5,8 @@ description: How the orchestrator does each step in Claude Code. The session-sta
 
 # Orchestrator in Claude Code
 
-- **Start a builder on this account:** the Agent tool, with the agent type that `scripts/next-issues` names, `run_in_background: true`, and a prompt that names the issue. The agent type gives it a worktree of its own.
-- **Start a builder on another account or on Codex:** run `scripts/launch` in the background, as its `--help` describes. Its exit wakes you.
-- **Send a builder a message:** SendMessage for an agent on this account, and `scripts/message` for one that `scripts/launch` started.
-- **Wait for CI, a merge or a reset:** a background command or Monitor that exits when the event happens. Never wait in the foreground.
+- **Start an agent:** run `scripts/launch <agent type> <number>` in the background, as its `--help` describes, whatever the account. Its exit wakes you with the agent's report.
+- **Send a running agent a message:** `scripts/message <agent ID> <message>`. For an agent that has stopped, such as a builder whose pull request got review errors, run `scripts/launch --resume <agent ID> --message "<message>"` in the background.
+- **Watch the loop:** `scripts/watch`, in the background. Its exit tells you what changed.
+- **Wait for anything else:** a background command or Monitor that exits when the event happens. Never wait in the foreground.
 - **Tell the maintainer:** PushNotification.

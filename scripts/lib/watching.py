@@ -14,6 +14,7 @@ import usage
 
 ROOT = usage.ROOT
 STATE = usage.LOOP / "watch.json"
+PID = usage.LOOP / "watch.pid"
 CONTEXTS = usage.LOOP / "contexts.json"
 REFRESH_REQUEST = usage.LOOP / "refresh-request"
 REFRESH_WAITING = usage.LOOP / "refresh-waiting"
