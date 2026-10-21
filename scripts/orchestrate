@@ -1,0 +1,75 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Starts the orchestrator in a tmux session with Remote Control on, or attaches to it if it runs already.
+
+usage: scripts/orchestrate [--account <name>] [<claude argument>...]
+
+The orchestrator runs in tmux so that scripts/send-clear can type /clear into it when its context needs a
+refresh. Its sandbox is off, because the scripts it runs start agents and take usage readings with `claude -p`,
+which can't reach Anthropic or write its own files inside the sandbox. Every agent it starts keeps the sandbox.
+Ctrl+G opens scripts/editor, which opens your own editor from VISUAL or EDITOR. --account names an account in
+.loop/accounts.json, and other arguments go to claude, such as --model opus.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import usage
+
+SESSION = f"orchestrator-{usage.ROOT.name}"
+SETTINGS = {"sandbox": {"enabled": False}}
+
+
+def has_session() -> bool:
+    return subprocess.run(["tmux", "has-session", "-t", SESSION], capture_output=True, check=False).returncode == 0
+
+
+def start(account: usage.Account | None, arguments: list[str]) -> None:
+    editor = str(usage.ROOT / "scripts" / "editor")
+    variables = {
+        "EDITOR": editor,
+        "VISUAL": editor,
+        "LOOP_EDITOR": os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi",
+        # The session-start hook warns when this is missing.
+        "LOOP_ORCHESTRATE": "1",
+    }
+    if account and account.home:
+        variables["CLAUDE_CONFIG_DIR"] = os.path.expanduser(account.home)
+    command = ["claude", "--remote-control", "--settings", json.dumps(SETTINGS), *arguments]
+    environment = [option for name, value in variables.items() for option in ("-e", f"{name}={value}")]
+    subprocess.run(
+        ["tmux", "new-session", "-d", "-s", SESSION, "-c", str(usage.ROOT), *environment, *command], check=True
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--account", help="an account in .loop/accounts.json")
+    arguments, claude_arguments = parser.parse_known_args()
+    account = None
+    if arguments.account:
+        account = next((a for a in usage.accounts() if a.name == arguments.account), None)
+        if account is None or account.provider != "claude":
+            print(f"No Claude account is called {arguments.account}. .loop/accounts.json lists the accounts.")
+            return 2
+    if has_session():
+        ignored = " Your arguments were ignored." if arguments.account or claude_arguments else ""
+        print(f"The orchestrator runs already, in tmux session {SESSION}.{ignored}")
+    else:
+        start(account, claude_arguments)
+    if not sys.stdout.isatty():
+        print(f"Attach to it with: tmux attach -t {SESSION}")
+        return 0
+    os.execvp("tmux", ["tmux", "attach", "-t", SESSION])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

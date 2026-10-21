@@ -11,7 +11,7 @@ The orchestrator runs it in the background, and its exit wakes the orchestrator.
 - runs the meter's decisions for every account, and tells agents to wind down when an account nears its limit
 - tells each session to hand off or refresh once a fresh one would cost less, and winds everything down when a
   session nears its context limit
-- retries a refresh that hasn't happened, once
+- retries a refresh that hasn't happened, once, and has the orchestrator tell the maintainer if the retry fails too
 - reports pull requests that merged, opened or failed their checks, and agents that have done nothing for a while
 - opens a `loop` issue when an agent type starts running a model it hasn't run before
 
@@ -45,6 +45,9 @@ def check(state: dict, actions: dict[str, str]) -> list[str]:
 
 
 def main() -> int:
+    if watching.PID.exists() and usage.is_running(running := int(watching.PID.read_text())):
+        print(f"scripts/watch runs already, as process {running}. Its exit wakes you, so you don't need another.")
+        return 0
     watching.PID.write_text(str(os.getpid()))
     try:
         return watch()

@@ -1,0 +1,74 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""Refreshes the orchestrator's context with /clear once its turn ends, after it has pruned its saved state.
+
+usage: scripts/refresh [--ready]
+
+Without --ready, it shows the checklist for pruning .loop/state.md, and what in the state looks out of place.
+With --ready, it requests the refresh, if the checklist was shown since the last refresh. Otherwise it shows the
+checklist first, as without --ready.
+
+The refresh happens after the turn ends. A tool call after the request cancels it, because the state may no
+longer match what the session did. Then the Stop hook tells the orchestrator to request it again. scripts/send-clear types
+/clear into the orchestrator's terminal, and the session-start hook gives the new session its skills, its state
+and the loop's status.
+"""
+
+import argparse
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "lib"))
+import github
+import refreshing
+import usage
+
+
+def closed(numbers: set[int]) -> set[int]:
+    """The issues and pull requests among `numbers` that are closed. A number that names neither is left out."""
+    repository = github.repository()
+    found = set()
+    for number in numbers:
+        state = subprocess.run(
+            ["gh", "api", f"repos/{repository}/issues/{number}", "--jq", ".state"],
+            capture_output=True, text=True, check=False,
+        ).stdout.strip()  # fmt: skip
+        if state == "closed":
+            found.add(number)
+    return found
+
+
+def show_checklist() -> None:
+    text = refreshing.STATE.read_text() if refreshing.STATE.exists() else ""
+    print(refreshing.CHECKLIST)
+    if found := refreshing.findings(text, closed(refreshing.references(text))):
+        print("\nThe script found these in .loop/state.md. Each can still be right, so change only what's out of date:")
+        print("\n".join(f"- {finding}" for finding in found))
+    print("\nThen run scripts/refresh --ready as the last step of your turn.")
+    refreshing.CHECKED.write_text(str(time.time()))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--ready", action="store_true", help="request the refresh after the checklist has been shown")
+    arguments = parser.parse_args()
+    if arguments.ready and refreshing.FAILED.exists():
+        print(
+            "The last refresh failed, and the maintainer has to clear this session by hand. Don't request another. "
+            "If you haven't told the maintainer yet, send them a notification."
+        )
+        return 1
+    if not arguments.ready or not refreshing.CHECKED.exists():
+        show_checklist()
+        return 0
+    refreshing.request(usage.orchestrator().get("transcript"))
+    print("The refresh happens once this turn ends. End your turn now. A tool call after this one cancels the refresh.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

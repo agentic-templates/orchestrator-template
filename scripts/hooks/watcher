@@ -22,6 +22,8 @@ def main() -> None:
     event = json.load(sys.stdin)
     if event.get("agent_type") not in (None, "orchestrator") or event.get("stop_hook_active"):
         return
+    if usage.orchestrator_elsewhere():
+        return
     if PID.exists() and usage.is_running(int(PID.read_text())):
         return
     reason = "scripts/watch isn't running. Start it in the background before you end your turn."

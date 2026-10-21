@@ -1,0 +1,49 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A Stop hook that starts scripts/send-clear once the orchestrator's turn ends after scripts/refresh --ready.
+
+If the orchestrator called a tool after the request, its saved state may not match what it did since, so the
+hook cancels the request and asks it to request the refresh again. The settings run it only while a request
+exists.
+"""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
+import refreshing
+import usage
+
+ASK_AGAIN = (
+    "The refresh is cancelled, because you used a tool after scripts/refresh --ready. If what you did since changes "
+    ".loop/state.md, update it. Then run scripts/refresh --ready again as the last step of your turn."
+)
+
+
+def main() -> None:
+    if "--help" in sys.argv[1:]:
+        print(__doc__)
+        return
+    event = json.load(sys.stdin)
+    saved = refreshing.load_request()
+    if event.get("agent_type") not in (None, "orchestrator") or saved is None or usage.orchestrator_elsewhere():
+        return
+    if refreshing.is_cancelled(saved):
+        refreshing.REQUEST.unlink(missing_ok=True)
+        print(json.dumps({"decision": "block", "reason": ASK_AGAIN}))
+        return
+    subprocess.Popen(
+        [str(usage.ROOT / "scripts" / "send-clear")],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

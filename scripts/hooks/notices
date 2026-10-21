@@ -21,6 +21,8 @@ import usage
 def main() -> None:
     event = json.load(sys.stdin)
     agent_id = os.environ.get("LOOP_AGENT_ID") or event.get("agent_id") or usage.ORCHESTRATOR_ID
+    if agent_id == usage.ORCHESTRATOR_ID and usage.orchestrator_elsewhere():
+        return
     if messages := usage.untold_notices(str(agent_id)):
         context = "\n\n".join(messages)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolBatch", "additionalContext": context}}))
