@@ -115,6 +115,19 @@ class RunningAgentsTest(unittest.TestCase):
             usage.end_orphans()
         self.assertEqual(child.wait(timeout=5), -signal.SIGKILL)
 
+    def test_a_launcher_that_exits_while_an_orphan_is_ended_is_left_alone(self):
+        orphan = self.orphan("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)")
+        time.sleep(0.2)
+        # A launcher that saved its record and exits before it starts the agent, such as when its worktree is busy.
+        launcher = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.5)", "launch"])
+        self.addCleanup(launcher.wait)
+        record = {"id": "builder-2-test", "pid": launcher.pid, "started": 1}
+        (usage.AGENTS / "builder-2-test.json").write_text(json.dumps(record))
+        with mock.patch.object(usage, "STOP_SECONDS", 1.0):
+            usage.end_orphans()
+        self.assertEqual(orphan.wait(timeout=5), -signal.SIGKILL)
+        self.assertNotIn("stopped", json.loads((usage.AGENTS / "builder-2-test.json").read_text()))
+
     def test_an_agent_that_ends_just_before_it_is_told_to_stop_counts_as_stopped(self):
         self.orphan("import time; time.sleep(30)")
         # The signal finds no process, as when the agent ends between the check and the signal.

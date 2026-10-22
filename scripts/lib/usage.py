@@ -230,7 +230,9 @@ def end_orphans() -> None:
     agent's session or saves its work, so it's ended before its work counts as left behind. This can take up to
     STOP_SECONDS for each."""
     for agent in running_agents():
-        if not is_running(agent["pid"], "launch"):
+        # Checked again for each agent, because ending the one before can take STOP_SECONDS, and a launcher can
+        # finish or fail meanwhile.
+        if is_orphan(agent) and not is_running(agent["pid"], "launch"):
             end(agent["child"], agent["id"])
             save_agent({**agent, "stopped": time.time()})
 
