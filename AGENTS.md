@@ -73,6 +73,6 @@ A change is done when all of these are true:
 
 Everything in the repository, its issues and its pull requests is public.
 
-- Keep working files in `.loop/`, which git ignores, or in a folder that `mktemp -d` makes.
+- Keep working files in `.loop/`, which git ignores.
 - Never read, print or commit secrets. Keep them in `.env`, and list each variable in `.env.example` with a placeholder value.
 - Keep personal email addresses, local paths and private links out of everything you commit or post.

@@ -91,46 +91,52 @@ def busy_worktree(path: Path, branch: str, running: list[dict]) -> str:
 
 def make_worktree(agent_id: str, branch: str | None = None, continues: bool = False) -> Path:
     """A worktree at the latest main, detached or on a new branch, or with `continues`, on the branch as it was
-    pushed. A stopped agent's worktree that holds the branch is saved and removed first. The launcher records the
-    branch's upstream, because the sandbox doesn't let the agent write .git/config."""
+    pushed. It has an empty .loop/ for the agent's working files, which git ignores."""
     path = WORKTREES / agent_id
     with git_lock():
         if branch is None:
             git("fetch", "--quiet", "origin")
             git("worktree", "add", "--quiet", "--detach", str(path), "origin/main")
-            return path
-        for old in worktrees_on(branch):
-            if reason := busy_worktree(old, branch, usage.running_agents()):
-                raise SystemExit(reason)
-            try:
-                merged = is_merged(old, branch)
-            except SystemExit as failure:
-                raise SystemExit(
-                    f"GitHub couldn't say whether {branch} merged, so the agent didn't start: {failure}. Launch it "
-                    "again later."
-                ) from None
-            if merged and git("status", "--porcelain", cwd=old):
-                raise SystemExit(f"The agent didn't start. {merged_leftovers(branch, old)}")
-            if merged:
-                git("worktree", "remove", "--force", str(old))
-                continue
-            if error := save_work(old):
-                raise SystemExit(
-                    f"The agent didn't start, because the last builder's work on {branch} isn't on GitHub yet. "
-                    + push_advice(error, old)
-                )
+        else:
+            add_branch_worktree(path, branch, continues)
+    (path / ".loop").mkdir()
+    return path
+
+
+def add_branch_worktree(path: Path, branch: str, continues: bool) -> None:
+    """Adds a worktree on the branch. A stopped agent's worktree that holds the branch is saved and removed first.
+    The launcher records the branch's upstream, because the sandbox doesn't let the agent write .git/config."""
+    for old in worktrees_on(branch):
+        if reason := busy_worktree(old, branch, usage.running_agents()):
+            raise SystemExit(reason)
+        try:
+            merged = is_merged(old, branch)
+        except SystemExit as failure:
+            raise SystemExit(
+                f"GitHub couldn't say whether {branch} merged, so the agent didn't start: {failure}. Launch it again "
+                "later."
+            ) from None
+        if merged and git("status", "--porcelain", cwd=old):
+            raise SystemExit(f"The agent didn't start. {merged_leftovers(branch, old)}")
+        if merged:
             git("worktree", "remove", "--force", str(old))
-        # Fetched after saving, so that a successor starts from the work just pushed.
-        git("fetch", "--quiet", "--prune", "origin")
-        pushed = git("branch", "--remotes", "--list", f"origin/{branch}")
-        if pushed and not continues:
-            # A builder that starts from main couldn't push over the branch, because the ruleset refuses force pushes.
-            raise SystemExit(f"{branch} exists on GitHub. Launch with --successor to continue it.")
-        start = f"origin/{branch}" if pushed else "origin/main"
-        git("worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
-        git("config", f"branch.{branch}.remote", "origin")
-        git("config", f"branch.{branch}.merge", f"refs/heads/{branch}")
-        return path
+            continue
+        if error := save_work(old):
+            raise SystemExit(
+                f"The agent didn't start, because the last builder's work on {branch} isn't on GitHub yet. "
+                + push_advice(error, old)
+            )
+        git("worktree", "remove", "--force", str(old))
+    # Fetched after saving, so that a successor starts from the work just pushed.
+    git("fetch", "--quiet", "--prune", "origin")
+    pushed = git("branch", "--remotes", "--list", f"origin/{branch}")
+    if pushed and not continues:
+        # A builder that starts from main couldn't push over the branch, because the ruleset refuses force pushes.
+        raise SystemExit(f"{branch} exists on GitHub. Launch with --successor to continue it.")
+    start = f"origin/{branch}" if pushed else "origin/main"
+    git("worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
+    git("config", f"branch.{branch}.remote", "origin")
+    git("config", f"branch.{branch}.merge", f"refs/heads/{branch}")
 
 
 @contextlib.contextmanager
