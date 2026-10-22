@@ -11,12 +11,10 @@ The orchestrator gives you the number of one issue, with its branch `issue-<numb
 2. Make the change as "Make a change" in AGENTS.md describes, until it meets "Definition of done".
 3. End with a short report: the pull request's link, any problem you noticed outside the issue, and anything you couldn't do.
 
-If you continue from a hand-off, read `git log` first to see what the builder before you committed.
-
 ## Hand off to a successor
 
 When a notice tells you to hand off or wind down:
 
-1. Commit and push your branch.
-2. Write a note for the builder after you, and save it with `scripts/handoff <issue> <file>`. The note says what's done, what's left in order, the files and line ranges you were working in, the commands you ran and where their output is, and any open question.
+1. Commit your work.
+2. Save a note for the builder after you as `.loop/handoff.md`. The note says what's done, what's left in order, the files and line ranges you were working in, the commands you ran, and any open question.
 3. End with your report.

@@ -36,6 +36,12 @@ def tokens_in(usage: dict) -> int:
     )
 
 
+def is_failed_request(entry: dict) -> bool:
+    """Whether a transcript entry or an output event is Claude Code's own message for a failed request, such as one
+    refused at a usage limit: it comes from the model "<synthetic>", with an error and zero usage."""
+    return bool(entry.get("error")) or (entry.get("message") or {}).get("model") == "<synthetic>"
+
+
 def update(context: Context, transcript: Path) -> Context:
     """Reads the turns that the transcript gained since `context` was last updated."""
     if not transcript.exists():
@@ -49,10 +55,7 @@ def update(context: Context, transcript: Path) -> Context:
     for line in complete.splitlines():
         entry = json.loads(line) if line.startswith(b"{") else {}
         message = entry.get("message") or {}
-        if entry.get("type") != "assistant" or "usage" not in message:
-            continue
-        # Claude Code writes entries of its own, such as for a failed request, from this model with zero usage.
-        if message.get("model") == "<synthetic>":
+        if entry.get("type") != "assistant" or "usage" not in message or is_failed_request(entry):
             continue
         # A turn can span several entries that repeat its usage, so turns are counted by message.
         if message.get("id") != context.last_message:

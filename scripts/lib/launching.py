@@ -6,12 +6,14 @@ import json
 import os
 import select
 import signal
+import stat
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import contexts
 import github
 import measurements
 import meter
@@ -39,6 +41,8 @@ class Session:
     report: str = ""
     reported: bool = False
     last_output: float = field(default_factory=time.time)
+    # The issue's hand-off note, deleted once the agent gives a real answer.
+    note: Path | None = None
 
 
 def git(*args: str, cwd: Path = ROOT) -> str:
@@ -89,23 +93,24 @@ def busy_worktree(path: Path, branch: str, running: list[dict]) -> str:
     return ""
 
 
-def make_worktree(agent_id: str, branch: str | None = None, continues: bool = False) -> Path:
-    """A worktree at the latest main, detached or on a new branch, or with `continues`, on the branch as it was
-    pushed. It has an empty .loop/ for the agent's working files, which git ignores."""
+def make_worktree(agent_id: str, issue: int | None = None, continues: bool = False) -> Path:
+    """A worktree at the latest main, detached or on the issue's new branch, or with `continues`, on the issue's
+    branch as it was pushed. It has an empty .loop/ for the agent's working files, which git ignores."""
     path = WORKTREES / agent_id
     with git_lock():
-        if branch is None:
+        if issue is None:
             git("fetch", "--quiet", "origin")
             git("worktree", "add", "--quiet", "--detach", str(path), "origin/main")
         else:
-            add_branch_worktree(path, branch, continues)
+            add_branch_worktree(path, issue, continues)
     (path / ".loop").mkdir()
     return path
 
 
-def add_branch_worktree(path: Path, branch: str, continues: bool) -> None:
-    """Adds a worktree on the branch. A stopped agent's worktree that holds the branch is saved and removed first.
-    The launcher records the branch's upstream, because the sandbox doesn't let the agent write .git/config."""
+def add_branch_worktree(path: Path, issue: int, continues: bool) -> None:
+    """Adds a worktree on the issue's branch. A stopped agent's worktree that holds the branch is saved and removed
+    first. The launcher records the branch's upstream, because the sandbox doesn't let the agent write .git/config."""
+    branch = f"issue-{issue}"
     for old in worktrees_on(branch):
         if reason := busy_worktree(old, branch, usage.running_agents()):
             raise SystemExit(reason)
@@ -121,6 +126,7 @@ def add_branch_worktree(path: Path, branch: str, continues: bool) -> None:
         if merged:
             git("worktree", "remove", "--force", str(old))
             continue
+        collect_note(old, issue)
         if error := save_work(old):
             raise SystemExit(
                 f"The agent didn't start, because the last builder's work on {branch} isn't on GitHub yet. "
@@ -221,6 +227,11 @@ def send(input_path: Path, text: str) -> None:
 def handle(session: Session, line: bytes) -> None:
     event = json.loads(line) if line.startswith(b"{") else {}
     session.last_output = time.time()
+    # Deleted only on a real answer, so that a session that fails at once leaves the note for the next successor.
+    is_answer = event.get("type") == "assistant" and not contexts.is_failed_request(event)
+    if session.note and is_answer:
+        session.note.unlink(missing_ok=True)
+        session.note = None
     if event.get("type") == "rate_limit_event":
         usage.record_claude_event(session.account, event)
     elif event.get("type") == "result":
@@ -257,7 +268,11 @@ def finish(session: Session, why: str) -> str:
     session.input_path.unlink(missing_ok=True)
     record = json.loads((usage.AGENTS / f"{session.agent_id}.json").read_text())
     with git_lock():
-        saved = saved_work(session.worktree) if built(record) else remove_worktree(session.worktree)
+        if built(record):
+            collect_note(session.worktree, record["number"])
+            saved = saved_work(session.worktree)
+        else:
+            saved = remove_worktree(session.worktree)
     record["stopped"] = time.time()
     usage.save_agent(record)
     if "told_to_wind_down" in record:
@@ -269,6 +284,71 @@ def finish(session: Session, why: str) -> str:
         print(text)
         sys.exit(0)
     return text
+
+
+def note_path(number: int) -> Path:
+    return usage.HANDOFF / f"issue-{number}.md"
+
+
+def note_for(number: int, continues: bool) -> Path | None:
+    """The issue's hand-off note for a builder that continues the issue, which the launcher deletes once the builder
+    has answered. A builder that starts from main makes any note about earlier work on the issue wrong, so it's
+    deleted."""
+    note = note_path(number)
+    if not continues:
+        note.unlink(missing_ok=True)
+    return note if continues and note.exists() else None
+
+
+def successor_message(number: int, note: Path | None, commits: str) -> str:
+    """The first message of a builder that continues the issue: the note of the builder before it, quoted, and the
+    commits on its branch that main doesn't have, one line each."""
+    if note:
+        quoted = "\n".join(f"> {line}" for line in note.read_text().splitlines())
+        text = f"Continue issue #{number}. The builder before you handed off with this note:\n\n{quoted}"
+    else:
+        text = f"Continue issue #{number}. The builder before you stopped without a hand-off note."
+    if not commits:
+        return f"{text}\n\nYour branch has no commits yet."
+    return f"{text}\n\nThe commits on your branch so far:\n\n{commits}"
+
+
+def branch_commits(worktree: Path) -> str:
+    return git("log", "--oneline", "origin/main..HEAD", cwd=worktree)
+
+
+def collect_note(worktree: Path, number: int) -> None:
+    """Moves the hand-off note a stopped builder left in its worktree to where the launcher gives it to the next
+    builder on the issue. Only a plain file counts, because through a link the launcher, which runs outside the
+    sandbox, would pass on a file that the builder can't read."""
+    try:
+        folder = os.open(worktree / usage.NOTE.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    except OSError:
+        return
+    try:
+        text = plain_file_text(folder, usage.NOTE.name)
+        if text is None:
+            return
+        usage.HANDOFF.mkdir(parents=True, exist_ok=True)
+        note_path(number).write_text(text)
+        os.unlink(usage.NOTE.name, dir_fd=folder)
+    finally:
+        os.close(folder)
+
+
+def plain_file_text(folder: int, name: str) -> str | None:
+    """The text of the file in the open folder, or None if it isn't a plain file with a single link."""
+    try:
+        # Without O_NONBLOCK, opening a named pipe would wait for a writer, holding the git lock.
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=folder)
+    except OSError:
+        return None
+    info = os.fstat(descriptor)
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        os.close(descriptor)
+        return None
+    with os.fdopen(descriptor, "rb") as file:
+        return file.read().decode(errors="replace")
 
 
 def saved_work(worktree: Path) -> str:

@@ -34,6 +34,9 @@ AGENTS = LOOP / "agents"
 # How long an agent may take to stop once told to, before it is killed.
 STOP_SECONDS = 30
 NOTICES = LOOP / "notices"
+HANDOFF = LOOP / "handoff"
+# Where a builder writes its hand-off note, inside its own worktree, the only place the sandbox lets it write.
+NOTE = Path(".loop") / "handoff.md"
 # The orchestrator's notices go under this name, because its session isn't a subagent with an ID.
 ORCHESTRATOR_ID = "orchestrator"
 ORCHESTRATOR = LOOP / "orchestrator.json"

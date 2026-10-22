@@ -1,6 +1,9 @@
 import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import launching
 import meter
@@ -145,6 +148,133 @@ class PushAdviceTest(unittest.TestCase):
         error = launching.push_error(offline)
         self.assertIn("Could not resolve hostname", error)
         self.assertNotIn("Please make sure", error)
+
+
+class HandleTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.note = Path(folder.name) / "issue-7.md"
+        self.note.write_text("Left: the tests.")
+        self.session = launching.Session("builder-7-abc", "id", "claude", Path(folder.name), None, Path(), Path())
+        self.session.note = self.note
+
+    def test_the_note_is_kept_until_the_agent_answers(self):
+        launching.handle(self.session, b'{"type": "system", "subtype": "init"}')
+        self.assertTrue(self.note.exists())
+        launching.handle(self.session, b'{"type": "assistant", "message": {"model": "claude-haiku-5-5"}}')
+        self.assertFalse(self.note.exists())
+
+    def test_the_note_is_kept_when_the_first_request_fails(self):
+        launching.handle(self.session, b'{"type": "assistant", "error": "rate_limit"}')
+        launching.handle(self.session, b'{"type": "assistant", "message": {"model": "<synthetic>"}}')
+        self.assertTrue(self.note.exists())
+
+    def test_a_note_written_later_is_kept(self):
+        launching.handle(self.session, b'{"type": "assistant"}')
+        self.note.write_text("Left: the docs.")
+        launching.handle(self.session, b'{"type": "assistant"}')
+        self.assertTrue(self.note.exists())
+
+
+class CollectNoteTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        self.worktree = self.root / "builder-7-abc"
+        (self.worktree / ".loop").mkdir(parents=True)
+        self.secret = self.root / "secret"
+        self.secret.write_text("a password")
+        patch = mock.patch.object(launching.usage, "HANDOFF", self.root / "handoff")
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def collected(self) -> str | None:
+        launching.collect_note(self.worktree, 7)
+        note = self.root / "handoff" / "issue-7.md"
+        return note.read_text() if note.exists() else None
+
+    def test_a_note_moves_under_the_issue(self):
+        (self.worktree / ".loop" / "handoff.md").write_text("Left: the tests.")
+        self.assertEqual(self.collected(), "Left: the tests.")
+        self.assertFalse((self.worktree / ".loop" / "handoff.md").exists())
+
+    def test_no_note(self):
+        self.assertIsNone(self.collected())
+
+    def test_a_link_to_another_file_is_ignored(self):
+        (self.worktree / ".loop" / "handoff.md").symlink_to(self.secret)
+        self.assertIsNone(self.collected())
+
+    def test_a_hard_link_to_another_file_is_ignored(self):
+        os.link(self.secret, self.worktree / ".loop" / "handoff.md")
+        self.assertIsNone(self.collected())
+
+    def test_a_named_pipe_is_ignored(self):
+        os.mkfifo(self.worktree / ".loop" / "handoff.md")
+        self.assertIsNone(self.collected())
+
+    def test_a_folder_is_ignored(self):
+        (self.worktree / ".loop" / "handoff.md").mkdir()
+        self.assertIsNone(self.collected())
+
+    def test_text_that_isnt_utf_8_is_kept_readable(self):
+        (self.worktree / ".loop" / "handoff.md").write_bytes(b"\xff\xfeLeft: the tests.")
+        self.assertTrue(self.collected().endswith("Left: the tests."))
+
+    def test_a_folder_swapped_for_a_link_while_the_note_is_read_keeps_the_other_file(self):
+        (self.worktree / ".loop" / "handoff.md").write_text("Left: the tests.")
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "handoff.md").write_text("a password")
+        read = launching.plain_file_text
+
+        def read_then_swap(folder: int, name: str) -> str | None:
+            text = read(folder, name)
+            (self.worktree / ".loop").rename(self.root / "moved")
+            (self.worktree / ".loop").symlink_to(elsewhere)
+            return text
+
+        # The swap must land between the read and the delete, and only the project's own code runs between them.
+        with mock.patch.object(launching, "plain_file_text", read_then_swap):
+            self.assertEqual(self.collected(), "Left: the tests.")
+        self.assertTrue((elsewhere / "handoff.md").exists())
+
+    def test_a_linked_folder_is_ignored(self):
+        elsewhere = self.root / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "handoff.md").write_text("a password")
+        (self.worktree / ".loop").rmdir()
+        (self.worktree / ".loop").symlink_to(elsewhere)
+        self.assertIsNone(self.collected())
+
+
+class NoteForTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        patch = mock.patch.object(launching.usage, "HANDOFF", Path(folder.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.note = Path(folder.name) / "issue-7.md"
+        self.note.write_text("Left: the tests.\nRun them with make test.")
+
+    def test_a_builder_that_continues_gets_the_note_quoted_and_the_commits(self):
+        note = launching.note_for(7, continues=True)
+        self.assertEqual(note, self.note)
+        message = launching.successor_message(7, note, "abc1234 feat: add the parser")
+        self.assertIn("\n\n> Left: the tests.\n> Run them with make test.\n\n", message)
+        self.assertTrue(message.endswith("\n\nabc1234 feat: add the parser"))
+
+    def test_a_builder_that_starts_from_main_deletes_the_note(self):
+        self.assertIsNone(launching.note_for(7, continues=False))
+        self.assertFalse(self.note.exists())
+
+    def test_a_successor_without_a_note_or_commits_is_told_so(self):
+        message = launching.successor_message(7, None, "")
+        self.assertIn("without a hand-off note", message)
+        self.assertIn("no commits yet", message)
 
 
 if __name__ == "__main__":
