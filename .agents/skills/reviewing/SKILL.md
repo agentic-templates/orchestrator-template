@@ -15,7 +15,7 @@ description: How to review a pull request or a plan. Read it before you review o
 - Read the pull request's description against the `writing` skill. You may cut or reword sentences, but don't ask for more text.
 - In a second review, read only what changed since the first one.
 
-Post the review with `gh pr review <number> --comment --body-file <file>`, with the file written outside the repository.
+Post the review with `gh pr review <number> --comment --body-file <file>`.
 
 ## Review as the reviewer agent
 
