@@ -19,10 +19,6 @@ account room.
 - A researcher gets the research issue's number.
 - With --resume, an agent that has stopped continues its own session, with its whole context, from the message,
   such as a builder given its review's errors.
-
-The agent is done once it has given its report, nothing has come from it for a minute, and it runs no command in
-the background. The launcher then stops it, commits and pushes any work left in its worktree, and prints its
-report. Stopping the launcher does the same.
 """
 
 import argparse
@@ -59,7 +55,7 @@ def prompt_for(arguments: argparse.Namespace) -> str:
 
 
 def parse() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("agent_type", nargs="?")
     parser.add_argument("number", type=int, nargs="?")
     parser.add_argument("--account")
@@ -81,7 +77,8 @@ def resume(arguments: argparse.Namespace) -> int:
     account = next(a for a in usage.accounts() if a.name == record["account"])
     worktree = Path(record["worktree"])
     if not worktree.exists():
-        worktree = launching.make_worktree(record["id"], f"issue-{record['number']}", continues=True)
+        branch = f"issue-{record['number']}" if launching.built(record) else None
+        worktree = launching.make_worktree(record["id"], branch, continues=True)
     session = launching.start(account, record["name"], record["id"], worktree, arguments.message, record["session"])
     return run(session, {**record, "started": time.time(), "pid": os.getpid(), "worktree": str(worktree)})
 
@@ -118,12 +115,17 @@ def main() -> int:
         "pid": os.getpid(),
         "worktree": str(worktree),
         "transcript": str(launching.transcript_path(account, worktree, session_id)),
+        "builds": launching.builds(arguments.agent_type),
     }
     # Saved before the agent starts, so that the meter counts it for a launch that comes right after this one.
     usage.save_agent(record)
-    builds = "building" in usage.agent_skills(arguments.agent_type)
-    branch = f"issue-{arguments.number}" if builds else None
-    launching.make_worktree(agent_id, branch, continues=arguments.successor)
+    branch = f"issue-{arguments.number}" if record["builds"] else None
+    try:
+        launching.make_worktree(agent_id, branch, continues=arguments.successor)
+    except SystemExit:
+        # The agent never started, so the meter mustn't count it.
+        (usage.AGENTS / f"{agent_id}.json").unlink()
+        raise
     session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments), session_id)
     return run(session, record)
 

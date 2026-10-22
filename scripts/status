@@ -6,17 +6,19 @@
 
 usage: scripts/status [--save]
 
-With --save, it also commits and pushes the changes left in each worktree that no running agent uses, so
-that the work of an agent that stopped isn't lost, and removes the worktrees whose branch has merged.
+With --save, it also commits and pushes the work that stopped builders left, and removes the worktrees no agent
+needs. It touches only the worktrees in .loop/worktrees, never your own.
 """
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import github
+import launching
 import usage
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,10 +35,11 @@ def running_agents() -> dict[str, dict]:
 
 
 def worktrees() -> list[dict]:
+    """The worktrees that scripts/launch made for agents. The maintainer's own worktrees are left alone."""
     result, current = [], {}
     for line in git("worktree", "list", "--porcelain").splitlines() + [""]:
         if not line:
-            if current and Path(current["worktree"]) != ROOT:
+            if current and Path(current["worktree"]).parent == launching.WORKTREES:
                 result.append(current)
             current = {}
         else:
@@ -45,26 +48,72 @@ def worktrees() -> list[dict]:
     return result
 
 
-def merged_branches() -> set[str]:
-    merged = github.gh_json("pr", "list", "--state", "merged", "--limit", "100", "--json", "headRefName") or []
-    return {pr["headRefName"] for pr in merged}
+def changed_files(changed: list[str]) -> str:
+    return f"{len(changed)} changed file" if len(changed) == 1 else f"{len(changed)} changed files"
 
 
-def tend_worktree(tree: dict, running: dict, merged: set[str], save: bool) -> str:
+def tend_worktree(tree: dict, running: dict, save: bool) -> str:
+    """The worktree's line in the status, or nothing for a worktree it removed."""
     path = Path(tree["worktree"])
     branch = tree.get("branch", "").removeprefix("refs/heads/")
-    changed = git("status", "--porcelain", cwd=path).splitlines()
     if path.as_posix() in running:
-        return f"- {branch}: {running[path.as_posix()]['name']} is working in it"
-    if save and branch in merged and not changed:
-        git("worktree", "remove", path.as_posix())
-        return f"- {branch}: merged, so its worktree was removed"
-    if save and changed:
-        git("add", "--all", cwd=path)
-        git("commit", "--quiet", "--no-verify", "-m", "chore: save unfinished work", cwd=path)
-        git("push", "--quiet", "--set-upstream", "origin", branch, cwd=path)
-        return f"- {branch}: {len(changed)} changed files of an agent that stopped, saved and pushed"
-    return f"- {branch}: {len(changed)} changed files, no agent" if changed else f"- {branch}: no agent"
+        return f"- {branch or path.name}: {running[path.as_posix()]['name']} is working in it"
+    if "prunable" in tree:
+        if save:
+            launching.remove_worktree(path)
+            return ""
+        return f"- {path.name}: its folder is gone"
+    changed = git("status", "--porcelain", cwd=path).splitlines()
+    if not branch:
+        # A builder that stopped in the middle of a rebase has no branch either, and its work must stay.
+        if save and not is_builders(path):
+            launching.remove_worktree(path)
+            return ""
+        return f"- {path.name}: no agent"
+    try:
+        merged = launching.is_merged(path, branch)
+    except SystemExit as failure:
+        return (
+            f"- {branch}: GitHub couldn't say whether it merged, so nothing was saved or removed: {failure}. Your next "
+            "session start tries again."
+        )
+    if merged:
+        if changed:
+            return f"- {launching.merged_leftovers(branch, path)}"
+        if save:
+            git("worktree", "remove", path.as_posix())
+            return ""
+        return f"- {branch}: merged, no agent"
+    if save and (changed or launching.unpushed(path)):
+        if error := launching.save_work(path):
+            return f"- {branch}: its builder stopped, and its work isn't on GitHub yet. {launching.push_advice(error, path)}"
+        return f"- {branch}: its builder stopped, and its work is pushed. Continue it with --successor."
+    if changed:
+        return f"- {branch}: {changed_files(changed)}, no agent"
+    if commits := launching.unpushed(path):
+        return f"- {branch}: no agent, and {commits} of its commits aren't on GitHub yet"
+    return f"- {branch}: no agent"
+
+
+def is_builders(worktree: Path) -> bool:
+    """Whether a builder worked in the worktree, as far as anyone knows. The launcher names it after the agent."""
+    record = usage.AGENTS / f"{worktree.name}.json"
+    return not record.exists() or launching.built(json.loads(record.read_text()))
+
+
+def tend_worktrees(save: bool) -> list[str]:
+    """One line for each worktree. A worktree that fails gets its error, and the others are still tended."""
+    lines = []
+    with launching.git_lock():
+        # Read once the lock is held, so that an agent that started meanwhile counts as running.
+        running = running_agents()
+        for tree in worktrees():
+            try:
+                if line := tend_worktree(tree, running, save):
+                    lines.append(line)
+            except subprocess.CalledProcessError as error:
+                lines.append(f"- {Path(tree['worktree']).name}: {(error.stderr or str(error)).strip()}")
+    return lines
 
 
 def pull_requests() -> list[str]:
@@ -81,20 +130,21 @@ def pull_requests() -> list[str]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
-        "--save", action="store_true", help="save the work of stopped agents, and remove merged worktrees"
+        "--save", action="store_true", help="save the work of stopped builders, and remove worktrees no agent needs"
     )
     arguments = parser.parse_args()
-    running = running_agents()
-    merged = merged_branches()
     print("## Running agents")
     agents = usage.running_agents()
     print("\n".join(f"- {a['id']}: {a['name']} on #{a['number']}, account {a['account']}" for a in agents) or "None")
     print("\n## Worktrees")
-    print("\n".join(tend_worktree(tree, running, merged, arguments.save) for tree in worktrees()) or "None")
+    print("\n".join(tend_worktrees(arguments.save)) or "None")
     print("\n## Open pull requests")
-    print("\n".join(pull_requests()) or "None")
+    try:
+        print("\n".join(pull_requests()) or "None")
+    except SystemExit as failure:
+        print(f"Couldn't list them: {failure}")
     return 0
 
 
