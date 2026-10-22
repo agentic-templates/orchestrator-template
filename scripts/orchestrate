@@ -9,9 +9,11 @@ usage: scripts/orchestrate [--account <name>] [<claude argument>...]
 The orchestrator runs in tmux so that scripts/send-clear can type /clear into it when its context needs a
 refresh. Its sandbox is off, because the scripts it runs start agents and take usage readings with `claude -p`,
 which can't reach Anthropic or write its own files inside the sandbox. Every agent it starts keeps the sandbox.
-Ctrl+G opens scripts/editor, which opens your own editor from VISUAL or EDITOR. --account names an account in
-.loop/accounts.json. Without it, the orchestrator runs on the account of the shell that runs scripts/orchestrate.
-Other arguments go to claude, such as --model opus.
+Ctrl+G opens scripts/editor, which opens your own editor from VISUAL or EDITOR. While the orchestrator runs, the
+Mac doesn't go to sleep when it's idle, and the orchestrator and its agents don't update Claude Code. Your other
+Claude Code sessions still can, and agents started after an update run the new version. --account names an account
+in .loop/accounts.json. Without it, the orchestrator runs on the account of the shell that runs
+scripts/orchestrate. Other arguments go to claude, such as --model opus.
 """
 
 import argparse
@@ -40,8 +42,11 @@ def start(account: usage.Account, arguments: list[str]) -> None:
         "LOOP_EDITOR": os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi",
         # The session-start hook warns when this is missing.
         "LOOP_ORCHESTRATE": "1",
+        # Agents inherit it. An update in the middle of a run would change what the loop was tested with.
+        "DISABLE_AUTOUPDATER": "1",
     }
-    command = usage.command_for(account, ["claude", "--remote-control", "--settings", json.dumps(SETTINGS), *arguments])
+    claude = ["claude", "--remote-control", "--settings", json.dumps(SETTINGS), *arguments]
+    command = usage.command_for(account, ["caffeinate", "-is", *claude])
     environment = [option for name, value in variables.items() for option in ("-e", f"{name}={value}")]
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", SESSION, "-c", str(usage.ROOT), *environment, *command], check=True
