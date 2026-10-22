@@ -9,10 +9,11 @@ usage: scripts/orchestrate [--account <name>] [<claude argument>...]
 The orchestrator runs in tmux so that scripts/send-clear can type /clear into it when its context needs a
 refresh. Its sandbox is off, because the scripts it runs start agents and take usage readings with `claude -p`,
 which can't reach Anthropic or write its own files inside the sandbox. Every agent it starts keeps the sandbox.
-Ctrl+G opens scripts/editor, which opens your own editor from VISUAL or EDITOR. While the orchestrator runs,
-caffeinate keeps the Mac from sleeping on its own, and Claude Code doesn't update itself in the orchestrator or the
-agents it starts. --account names an account in .loop/accounts.json. Without it, the orchestrator runs on the
-account of the shell that runs scripts/orchestrate. Other arguments go to claude, such as --model opus.
+Ctrl+G opens scripts/editor, which opens your own editor from VISUAL or EDITOR. While the orchestrator runs, the
+Mac doesn't go to sleep when it's idle, and the orchestrator and its agents don't update Claude Code. Your other
+Claude Code sessions still can, and agents started after an update run the new version. --account names an account
+in .loop/accounts.json. Without it, the orchestrator runs on the account of the shell that runs
+scripts/orchestrate. Other arguments go to claude, such as --model opus.
 """
 
 import argparse
