@@ -24,7 +24,7 @@ def main() -> None:
         return
     if usage.orchestrator_elsewhere():
         return
-    if PID.exists() and usage.is_running(int(PID.read_text())):
+    if PID.exists() and usage.is_running(int(PID.read_text()), "watch"):
         return
     reason = "scripts/watch isn't running. Start it in the background before you end your turn."
     print(json.dumps({"decision": "block", "reason": reason}))

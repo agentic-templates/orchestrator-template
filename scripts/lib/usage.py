@@ -1,8 +1,10 @@
 """The loop's accounts, their usage readings and the agents running on them, all kept in `.loop/`."""
 
+import contextlib
 import json
 import os
 import select
+import signal
 import subprocess
 import tempfile
 import time
@@ -29,6 +31,8 @@ LOOP = ROOT / ".loop"
 ACCOUNTS = LOOP / "accounts.json"
 USAGE = LOOP / "usage"
 AGENTS = LOOP / "agents"
+# How long an agent may take to stop once told to, before it is killed.
+STOP_SECONDS = 30
 NOTICES = LOOP / "notices"
 # The orchestrator's notices go under this name, because its session isn't a subagent with an ID.
 ORCHESTRATOR_ID = "orchestrator"
@@ -199,8 +203,9 @@ def read_rate_limits(server: subprocess.Popen) -> dict[str, dict]:
 
 
 def running_agents() -> list[dict]:
-    """The agents that scripts/launch started and that still run, oldest first. An agent whose launcher has gone
-    without saying so, such as after a crash, is marked as stopped."""
+    """The agents that scripts/launch started and that still run, oldest first, including an agent whose launcher has
+    gone without saying so, such as after a crash, until end_orphans ends it. One whose launcher and session have
+    both gone is marked as stopped."""
     if not AGENTS.exists():
         return []
     running = []
@@ -208,21 +213,51 @@ def running_agents() -> list[dict]:
         agent = json.loads(path.read_text())
         if "stopped" in agent:
             continue
-        if is_running(agent["pid"]):
+        if is_running(agent["pid"], "launch") or is_orphan(agent):
             running.append(agent)
         else:
             save_agent({**agent, "stopped": time.time()})
     return sorted(running, key=lambda agent: agent["started"])
 
 
-def is_running(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+def is_orphan(agent: dict) -> bool:
+    """Whether the agent's session still runs after its launcher has gone."""
+    return bool(agent.get("child")) and is_running(agent["child"], agent["id"])
+
+
+def end_orphans() -> None:
+    """Ends each agent whose launcher has gone, and marks it as stopped. Without its launcher, nothing reads the
+    agent's session or saves its work, so it's ended before its work counts as left behind. This can take up to
+    STOP_SECONDS for each."""
+    for agent in running_agents():
+        # Checked again for each agent, because ending the one before can take STOP_SECONDS, and a launcher can
+        # finish or fail meanwhile.
+        if is_orphan(agent) and not is_running(agent["pid"], "launch"):
+            end(agent["child"], agent["id"])
+            save_agent({**agent, "stopped": time.time()})
+
+
+def end(pid: int, name: str) -> None:
+    """Stops the process if its command line has `name`, and kills it if it hasn't stopped within STOP_SECONDS."""
+    if not is_running(pid, name):
+        return
+    # The process can end between the check and the signal, such as when the watcher and scripts/status end the
+    # same agent at once.
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + STOP_SECONDS
+        while time.time() < deadline:
+            if not is_running(pid, name):
+                return
+            time.sleep(0.2)
+        os.kill(pid, signal.SIGKILL)
+
+
+def is_running(pid: int, name: str) -> bool:
+    """Whether the process's command line has `name` as a word, such as the program "watch" whatever path started
+    it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
+    command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, check=False)
+    return name in (Path(word).name for word in command.stdout.split())
 
 
 def save_agent(agent: dict) -> None:
@@ -266,12 +301,20 @@ def this_session() -> int | None:
 def orchestrator_elsewhere() -> int | None:
     """The process ID of an orchestrator that runs in another session of this checkout, if one does. A second
     session started in the main checkout would otherwise take over its records and its notices."""
-    recorded = orchestrator().get("pid")
-    return recorded if runs_elsewhere(recorded, this_session()) else None
+    record = orchestrator()
+    return record["pid"] if runs_elsewhere(record.get("pid"), record.get("started"), this_session()) else None
 
 
-def runs_elsewhere(recorded: int | None, mine: int | None) -> bool:
-    return bool(recorded) and recorded != mine and is_running(recorded)
+def runs_elsewhere(recorded: int | None, started: str | None, mine: int | None) -> bool:
+    """Whether the recorded orchestrator still runs and isn't this session. Its start time tells it apart from a
+    later process that got the same ID, such as an agent's session after a restart."""
+    return bool(recorded) and recorded != mine and started_at(recorded) == started
+
+
+def started_at(pid: int) -> str:
+    """When the process started, or nothing if no process has the ID."""
+    command = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, check=False)
+    return command.stdout.strip()
 
 
 def minutes_since_maintainer_wrote() -> float:

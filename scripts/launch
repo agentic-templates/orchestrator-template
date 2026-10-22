@@ -86,6 +86,7 @@ def resume(arguments: argparse.Namespace) -> int:
 def run(session: launching.Session, record: dict) -> int:
     record.pop("stopped", None)
     record.pop("told_to_wind_down", None)
+    record["child"] = session.process.pid
     signal.signal(signal.SIGTERM, lambda *_: launching.finish(session, "stopped"))
     usage.save_agent(record)
     print(launching.wait(session, record))

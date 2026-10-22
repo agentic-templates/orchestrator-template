@@ -132,13 +132,8 @@ def check_refresh(state: dict) -> list[str]:
 
 
 def is_sender_running() -> bool:
-    """Whether scripts/send-clear still runs. Its process ID could have gone to another program after a crash."""
-    if not SENDER_PID.exists():
-        return False
-    command = subprocess.run(
-        ["ps", "-o", "command=", "-p", SENDER_PID.read_text().strip()], capture_output=True, text=True, check=False
-    ).stdout
-    return "send-clear" in command
+    """Whether scripts/send-clear still runs."""
+    return SENDER_PID.exists() and usage.is_running(int(SENDER_PID.read_text()), "send-clear")
 
 
 def check_pull_requests(state: dict) -> list[str]:

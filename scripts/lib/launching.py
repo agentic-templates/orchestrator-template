@@ -246,9 +246,8 @@ def finish(session: Session, why: str) -> str:
     """Stops the agent, saves the work left in its worktree to its branch, and returns its report."""
     # A second finish, started by a SIGTERM while this one holds the git lock, would wait for the lock forever.
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    if session.process.poll() is None:
-        session.process.terminate()
-        session.process.wait(timeout=30)
+    usage.end(session.process.pid, session.agent_id)
+    session.process.wait()
     session.input_path.unlink(missing_ok=True)
     record = json.loads((usage.AGENTS / f"{session.agent_id}.json").read_text())
     with git_lock():

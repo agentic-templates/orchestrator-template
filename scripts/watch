@@ -13,6 +13,7 @@ The orchestrator runs it in the background, and its exit wakes the orchestrator.
   session nears its context limit
 - retries a refresh that hasn't happened, once, and has the orchestrator tell the maintainer if the retry fails too
 - reports pull requests that merged, opened or failed their checks, and agents that have done nothing for a while
+- ends agents whose launcher has gone, such as after a crash
 - opens a `loop` issue when an agent type starts running a model it hasn't run before
 
 It also exits after 50 minutes, so that the orchestrator's prompt cache, which lasts an hour, stays warm.
@@ -33,6 +34,7 @@ WARM_WAKE_SECONDS = 50 * 60
 
 
 def check(state: dict, actions: dict[str, str]) -> list[str]:
+    usage.end_orphans()
     result = metering.decisions()
     events = [f"Usage: {name} now says {d.action}." for name, d in result.items() if actions.get(name) != d.action]
     actions.update({name: d.action for name, d in result.items()})
@@ -45,7 +47,7 @@ def check(state: dict, actions: dict[str, str]) -> list[str]:
 
 
 def main() -> int:
-    if watching.PID.exists() and usage.is_running(running := int(watching.PID.read_text())):
+    if watching.PID.exists() and usage.is_running(running := int(watching.PID.read_text()), "watch"):
         print(f"scripts/watch runs already, as process {running}. Its exit wakes you, so you don't need another.")
         return 0
     watching.PID.write_text(str(os.getpid()))

@@ -56,7 +56,13 @@ def take_over(provider: str) -> None:
     """Records the orchestrator's account, and the tmux pane that scripts/send-clear types /clear into."""
     usage.LOOP.mkdir(exist_ok=True)
     account = usage.account_of(dict(os.environ), provider)
-    record = {"account": account, "pane": os.environ.get("TMUX_PANE"), "pid": usage.this_session()}
+    pid = usage.this_session()
+    record = {
+        "account": account,
+        "pane": os.environ.get("TMUX_PANE"),
+        "pid": pid,
+        "started": pid and usage.started_at(pid),
+    }
     usage.ORCHESTRATOR.write_text(json.dumps(record))
     refreshing.clear()
 
