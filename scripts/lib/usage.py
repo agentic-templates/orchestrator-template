@@ -50,13 +50,24 @@ class Account:
     name: str
     provider: str  # "claude" or "codex"
     home: str | None  # the CLAUDE_CONFIG_DIR or CODEX_HOME, or None for the default
+    reserve: float = 0.0  # percent of each window that the loop leaves alone, such as for the maintainer's own use
 
 
 def accounts() -> list[Account]:
     """The accounts in .loop/accounts.json, or this machine's default Claude account without that file."""
     if not ACCOUNTS.exists():
         return [Account("claude", "claude", None)]
-    return [Account(item["name"], item["provider"], item.get("home")) for item in json.loads(ACCOUNTS.read_text())]
+    return [account_from(item) for item in json.loads(ACCOUNTS.read_text())]
+
+
+def account_from(item: dict) -> Account:
+    reserve = item.get("reserve", 0)
+    if not isinstance(reserve, int | float) or not 0 <= reserve < 100:
+        raise SystemExit(
+            f".loop/accounts.json gives {item['name']} a reserve of {reserve!r}. A reserve is the percent of each "
+            "window that the loop leaves alone: a number from 0 up to, but not including, 100."
+        )
+    return Account(item["name"], item["provider"], item.get("home"), float(reserve))
 
 
 def account_of(environment: dict[str, str], provider: str = "claude") -> str:

@@ -10,11 +10,18 @@ WINDOW = 300  # minutes in a 5-hour window
 REACTION = 8.0
 
 
+def load(agents: int, **options) -> meter.Load:
+    """Agents that have run since long before the readings."""
+    return meter.Load(agents, REACTION, 1.0, tuple((-100_000.0, None) for _ in range(agents)), **options)
+
+
 @dataclass
 class Agent:
     burn: float  # percent per minute
     minutes_left: float
     stops_in: float | None = None  # minutes until it stops after a wind-down notice
+    started: float = 0.0
+    stopped: float | None = None
 
 
 @dataclass
@@ -29,6 +36,7 @@ class Simulation:
     readings_stop_at: int | None = None
     used: float = 0.0
     agents: list[Agent] = field(default_factory=list)
+    finished: list[Agent] = field(default_factory=list)
     readings: list[Reading] = field(default_factory=list)
     peak: float = 0.0
     wind_downs: int = 0
@@ -44,9 +52,10 @@ class Simulation:
             self.read(minute, now)
             running = [agent for agent in self.agents if agent.stops_in is None]
             measured = not self.readings or self.readings[-1].time > self.last_start
-            load = meter.Load(len(running), REACTION, 1.0, measured_since_last_start=measured)
+            runs = tuple((agent.started, agent.stopped) for agent in self.agents + self.finished)
+            load = meter.Load(len(running), REACTION, 1.0, runs, measured_since_last_start=measured)
             self.act(meter.decide({"5h": self.readings}, now, load), now)
-            self.work()
+            self.work(now)
         return self
 
     def read(self, minute: int, now: float) -> None:
@@ -57,7 +66,7 @@ class Simulation:
     def act(self, decision: meter.Decision, now: float) -> None:
         if decision.action == "start":
             for _ in range(min(decision.room, self.issues, self.max_agents - len(self.agents))):
-                self.agents.append(Agent(self.agent_burn, self.issue_minutes))
+                self.agents.append(Agent(self.agent_burn, self.issue_minutes, started=now))
                 self.issues -= 1
                 self.last_start = now
         running = [agent for agent in self.agents if agent.stops_in is None]
@@ -65,13 +74,16 @@ class Simulation:
             agent.stops_in = REACTION
             self.wind_downs += 1
 
-    def work(self) -> None:
+    def work(self, now: float) -> None:
         for agent in self.agents:
             self.used += agent.burn
             agent.minutes_left -= 1
             if agent.stops_in is not None:
                 agent.stops_in -= 1
-        self.agents = [a for a in self.agents if a.minutes_left > 0 and (a.stops_in is None or a.stops_in > 0)]
+            if agent.minutes_left <= 0 or (agent.stops_in is not None and agent.stops_in <= 0):
+                agent.stopped = now + MINUTE
+                self.finished.append(agent)
+        self.agents = [a for a in self.agents if a.stopped is None]
         self.peak = max(self.peak, self.used)
 
 
@@ -99,6 +111,16 @@ class WindDownTest(unittest.TestCase):
         self.assertLess(simulation.peak, 100)
         self.assertGreater(simulation.wind_downs, 0)
 
+    def test_short_and_long_issues_with_fast_and_slow_agents_stop_before_the_limit(self):
+        # Readings in whole percents, taken every minute or every five, as the orchestrator's status line and the
+        # probes give them.
+        for burn in (0.02, 0.1, 0.2, 0.4):
+            for minutes in (15, 40):
+                for every in (1, 5):
+                    simulation = Simulation(agent_burn=burn, issue_minutes=minutes, issues=500, reading_every=every)
+                    with self.subTest(burn=burn, minutes=minutes, every=every):
+                        self.assertLess(simulation.run().peak, 100)
+
     def test_readings_every_five_minutes_still_stop_before_the_limit(self):
         simulation = Simulation(agent_burn=0.05, issue_minutes=40, issues=500, reading_every=5).run()
         self.assertLess(simulation.peak, 100)
@@ -107,36 +129,78 @@ class WindDownTest(unittest.TestCase):
 
 class DecideTest(unittest.TestCase):
     def test_starts_on_an_account_with_no_readings_or_a_reset_window(self):
-        self.assertEqual(meter.decide({}, 0, meter.Load(0, REACTION, 1.0)).action, "start")
+        self.assertEqual(meter.decide({}, 0, load(0)).action, "start")
         reset = [Reading(0, 99, 100)]
-        self.assertEqual(meter.decide({"5h": reset}, 200, meter.Load(3, REACTION, 1.0)).action, "start")
+        self.assertEqual(meter.decide({"5h": reset}, 200, load(3)).action, "start")
 
     def test_the_strictest_window_decides(self):
         five_hour = [Reading(0, 10, 10_000), Reading(600, 12, 10_000)]
-        weekly = [Reading(0, 97.06, 900_000), Reading(600, 97.56, 900_000)]
-        self.assertEqual(
-            meter.decide({"5h": five_hour, "7d": weekly}, 600, meter.Load(2, REACTION, 1.0)).action, "wind down"
-        )
+        weekly = [Reading(0, 96.06, 900_000), Reading(600, 96.56, 900_000)]
+        self.assertEqual(meter.decide({"5h": five_hour, "7d": weekly}, 600, load(2)).action, "wind down")
 
     def test_starts_no_more_agents_until_a_reading_shows_what_the_last_ones_use(self):
         readings = [Reading(0, 10, 10_000), Reading(600, 11, 10_000)]
-        waiting = meter.Load(2, REACTION, 1.0, measured_since_last_start=False)
+        waiting = load(2, measured_since_last_start=False)
         self.assertEqual(meter.decide({"5h": readings}, 600, waiting).action, "hold")
-        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0)).action, "start")
+        self.assertEqual(meter.decide({"5h": readings}, 600, load(2)).action, "start")
+
+    def test_agents_that_started_after_the_readings_count_at_the_rate_of_those_in_them(self):
+        # One agent used 0.5% a minute; two more started after the latest reading.
+        readings = [Reading(0, 80, 10_000), Reading(600, 85, 10_000)]
+        runs = ((-1_000.0, None), (650.0, None), (650.0, None))
+        self.assertEqual(meter.decide({"5h": readings}, 660, meter.Load(3, REACTION, 1.0, runs)).action, "pause")
+
+    def test_agents_whose_use_doesnt_show_in_whole_percents_keep_running(self):
+        # Ten slow agents on a weekly window that hasn't moved for 20 minutes.
+        readings = [Reading(0, 90, 900_000), Reading(1_200, 90, 900_000)]
+        runs = tuple((-5_000.0, None) for _ in range(10))
+        decision = meter.decide({"7d": readings}, 1_200, meter.Load(10, REACTION, 1.0, runs))
+        self.assertEqual(decision.action, "start")
+
+    def test_an_agent_whose_use_hasnt_shown_yet_counts_at_one_percent_over_the_span(self):
+        # One agent ran through five minutes in which the whole-percent reading didn't move.
+        readings = [Reading(0, 92, 10_000), Reading(300, 92, 10_000)]
+        decision = meter.decide({"5h": readings}, 300, meter.Load(1, REACTION, 1.0, ((0.0, None),)))
+        self.assertEqual((decision.action, decision.burn), ("hold", 0.2))
+
+    def test_after_a_pause_agents_count_at_the_rate_measured_before_it(self):
+        # One agent used 0.5% a minute and stopped; 40 quiet minutes later, two agents started.
+        quiet = [Reading(time, 80, 10_000) for time in (1_200, 1_800, 2_400, 3_000)]
+        readings = [Reading(0, 75, 10_000), Reading(600, 80, 10_000), *quiet]
+        runs = ((-1_000.0, 600.0), (2_950.0, None), (2_950.0, None))
+        self.assertEqual(meter.decide({"5h": readings}, 3_000, meter.Load(2, REACTION, 1.0, runs)).action, "hold")
+
+    def test_a_reading_of_another_window_among_the_readings_is_left_out(self):
+        stray = Reading(300, 10, 5_000)
+        readings = [Reading(0, 70, 10_000), stray, Reading(600, 75, 10_000)]
+        self.assertEqual(meter.burn_rate(readings), 0.5)
+
+    def test_a_reading_a_hair_below_the_one_before_tells_no_agent_to_stop(self):
+        # A status-line reading of 57, then an agent's 0.57 of the window times 100.
+        readings = [Reading(0, 57, 900_000), Reading(300, 0.57 * 100, 900_000)]
+        runs = ((-5_000.0, None), (-5_000.0, None))
+        decision = meter.decide({"7d": readings}, 300, meter.Load(2, REACTION, 1.0, runs))
+        self.assertEqual(decision.wind_down, 0)
+
+    def test_an_agent_that_just_started_isnt_charged_with_the_accounts_other_use(self):
+        # The orchestrator uses 0.2% a minute of its own account; an agent started there 10 seconds ago.
+        readings = [Reading(0, 69, 10_000), Reading(300, 70, 10_000)]
+        decision = meter.decide({"5h": readings}, 300, meter.Load(1, REACTION, 1.0, ((290.0, None),)))
+        self.assertEqual(decision.action, "start")
 
     def test_starts_no_agent_that_would_have_to_stop_soon(self):
-        # One agent at 0.5% a minute, at 91%: two agents would reach the stop point in 7 minutes.
+        # One agent at 0.5% a minute, at 91%: two agents would reach the stop point in 6 minutes.
         readings = [Reading(0, 86, 10_000), Reading(600, 91, 10_000)]
-        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(1, REACTION, 1.0)).action, "hold")
+        self.assertEqual(meter.decide({"5h": readings}, 600, load(1)).action, "hold")
 
     def test_starts_an_agent_with_a_tenth_of_the_window_left_and_nothing_running(self):
         readings = [Reading(0, 88, 10_000), Reading(600, 88, 10_000)]
-        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(0, REACTION, 1.0)).action, "start")
+        self.assertEqual(meter.decide({"5h": readings}, 600, load(0)).action, "start")
 
     def test_a_reserve_holds_the_account_back_earlier(self):
         readings = [Reading(0, 80, 10_000), Reading(600, 82, 10_000)]
-        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0)).action, "start")
-        self.assertEqual(meter.decide({"5h": readings}, 600, meter.Load(2, REACTION, 1.0, reserve=15)).action, "pause")
+        self.assertEqual(meter.decide({"5h": readings}, 600, load(2)).action, "start")
+        self.assertEqual(meter.decide({"5h": readings}, 600, load(2, reserve=15)).action, "pause")
 
 
 if __name__ == "__main__":
