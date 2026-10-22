@@ -135,6 +135,8 @@ def main() -> int:
         "--save", action="store_true", help="save the work of stopped builders, and remove worktrees no agent needs"
     )
     arguments = parser.parse_args()
+    if arguments.save:
+        usage.end_orphans()
     print("## Running agents")
     agents = usage.running_agents()
     print("\n".join(f"- {a['id']}: {a['name']} on #{a['number']}, account {a['account']}" for a in agents) or "None")

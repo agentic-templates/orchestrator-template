@@ -203,8 +203,9 @@ def read_rate_limits(server: subprocess.Popen) -> dict[str, dict]:
 
 
 def running_agents() -> list[dict]:
-    """The agents that scripts/launch started and that still run, oldest first. An agent whose launcher has gone
-    without saying so, such as after a crash, is ended, which can take up to STOP_SECONDS, and marked as stopped."""
+    """The agents that scripts/launch started and that still run, oldest first, including an agent whose launcher has
+    gone without saying so, such as after a crash, until end_orphans ends it. One whose launcher and session have
+    both gone is marked as stopped."""
     if not AGENTS.exists():
         return []
     running = []
@@ -212,20 +213,31 @@ def running_agents() -> list[dict]:
         agent = json.loads(path.read_text())
         if "stopped" in agent:
             continue
-        if is_running(agent["pid"], "launch"):
+        if is_running(agent["pid"], "launch") or is_orphan(agent):
             running.append(agent)
-            continue
-        # Without its launcher, nothing reads the agent's session or saves its work, so it's ended before its work
-        # counts as left behind.
-        if agent.get("child"):
-            end(agent["child"], agent["id"])
-        save_agent({**agent, "stopped": time.time()})
+        else:
+            save_agent({**agent, "stopped": time.time()})
     return sorted(running, key=lambda agent: agent["started"])
 
 
-def end(pid: int, program: str) -> None:
-    """Stops the process if it runs `program`, and kills it if it hasn't stopped within STOP_SECONDS."""
-    if not is_running(pid, program):
+def is_orphan(agent: dict) -> bool:
+    """Whether the agent's session still runs after its launcher has gone."""
+    return bool(agent.get("child")) and is_running(agent["child"], agent["id"])
+
+
+def end_orphans() -> None:
+    """Ends each agent whose launcher has gone, and marks it as stopped. Without its launcher, nothing reads the
+    agent's session or saves its work, so it's ended before its work counts as left behind. This can take up to
+    STOP_SECONDS for each."""
+    for agent in running_agents():
+        if not is_running(agent["pid"], "launch"):
+            end(agent["child"], agent["id"])
+            save_agent({**agent, "stopped": time.time()})
+
+
+def end(pid: int, name: str) -> None:
+    """Stops the process if its command line has `name`, and kills it if it hasn't stopped within STOP_SECONDS."""
+    if not is_running(pid, name):
         return
     # The process can end between the check and the signal, such as when the watcher and scripts/status end the
     # same agent at once.
@@ -233,17 +245,17 @@ def end(pid: int, program: str) -> None:
         os.kill(pid, signal.SIGTERM)
         deadline = time.time() + STOP_SECONDS
         while time.time() < deadline:
-            if not is_running(pid, program):
+            if not is_running(pid, name):
                 return
             time.sleep(0.2)
         os.kill(pid, signal.SIGKILL)
 
 
-def is_running(pid: int, program: str) -> bool:
-    """Whether the process runs `program`, a name in its command line such as "watch", whatever path started it.
-    Once a process has ended, its ID can go to another program, such as after a restart."""
+def is_running(pid: int, name: str) -> bool:
+    """Whether the process's command line has `name` as a word, such as the program "watch" whatever path started
+    it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
     command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, check=False)
-    return program in (Path(word).name for word in command.stdout.split())
+    return name in (Path(word).name for word in command.stdout.split())
 
 
 def save_agent(agent: dict) -> None:

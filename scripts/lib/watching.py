@@ -132,7 +132,7 @@ def check_refresh(state: dict) -> list[str]:
 
 
 def is_sender_running() -> bool:
-    """Whether scripts/send-clear still runs. Its process ID could have gone to another program after a crash."""
+    """Whether scripts/send-clear still runs."""
     return SENDER_PID.exists() and usage.is_running(int(SENDER_PID.read_text()), "send-clear")
 
 
