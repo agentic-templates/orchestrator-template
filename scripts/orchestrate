@@ -10,7 +10,8 @@ The orchestrator runs in tmux so that scripts/send-clear can type /clear into it
 refresh. Its sandbox is off, because the scripts it runs start agents and take usage readings with `claude -p`,
 which can't reach Anthropic or write its own files inside the sandbox. Every agent it starts keeps the sandbox.
 Ctrl+G opens scripts/editor, which opens your own editor from VISUAL or EDITOR. --account names an account in
-.loop/accounts.json, and other arguments go to claude, such as --model opus.
+.loop/accounts.json. Without it, the orchestrator runs on the account of the shell that runs scripts/orchestrate.
+Other arguments go to claude, such as --model opus.
 """
 
 import argparse
@@ -31,7 +32,7 @@ def has_session() -> bool:
     return subprocess.run(["tmux", "has-session", "-t", SESSION], capture_output=True, check=False).returncode == 0
 
 
-def start(account: usage.Account | None, arguments: list[str]) -> None:
+def start(account: usage.Account, arguments: list[str]) -> None:
     editor = str(usage.ROOT / "scripts" / "editor")
     variables = {
         "EDITOR": editor,
@@ -40,9 +41,7 @@ def start(account: usage.Account | None, arguments: list[str]) -> None:
         # The session-start hook warns when this is missing.
         "LOOP_ORCHESTRATE": "1",
     }
-    if account and account.home:
-        variables["CLAUDE_CONFIG_DIR"] = os.path.expanduser(account.home)
-    command = ["claude", "--remote-control", "--settings", json.dumps(SETTINGS), *arguments]
+    command = usage.command_for(account, ["claude", "--remote-control", "--settings", json.dumps(SETTINGS), *arguments])
     environment = [option for name, value in variables.items() for option in ("-e", f"{name}={value}")]
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", SESSION, "-c", str(usage.ROOT), *environment, *command], check=True
@@ -53,7 +52,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--account", help="an account in .loop/accounts.json")
     arguments, claude_arguments = parser.parse_known_args()
-    account = None
+    account = usage.Account("shell", "claude", os.environ.get("CLAUDE_CONFIG_DIR"))
     if arguments.account:
         account = next((a for a in usage.accounts() if a.name == arguments.account), None)
         if account is None or account.provider != "claude":
