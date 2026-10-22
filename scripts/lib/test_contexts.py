@@ -25,6 +25,12 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual((context.start, context.current, context.turns), (40_000, 44_000, 2))
         self.assertEqual(context.model, "claude-opus-5-5")
 
+    def test_skips_the_message_of_a_failed_request(self):
+        failed = json.dumps({"type": "assistant", "message": {"id": "c", "model": "<synthetic>", "usage": {}}}) + "\n"
+        self.write(turn("a", 40_000), turn("b", 44_000), failed)
+        context = update(Context(), self.path)
+        self.assertEqual((context.current, context.turns, context.model), (44_000, 2, "claude-opus-5-5"))
+
     def test_counts_a_turn_once_when_its_usage_repeats(self):
         self.write(turn("a", 40_000), turn("a", 40_000), turn("b", 45_000))
         self.assertEqual(update(Context(), self.path).turns, 2)

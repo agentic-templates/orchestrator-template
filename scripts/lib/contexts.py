@@ -51,6 +51,9 @@ def update(context: Context, transcript: Path) -> Context:
         message = entry.get("message") or {}
         if entry.get("type") != "assistant" or "usage" not in message:
             continue
+        # Claude Code writes entries of its own, such as for a failed request, from this model with zero usage.
+        if message.get("model") == "<synthetic>":
+            continue
         # A turn can span several entries that repeat its usage, so turns are counted by message.
         if message.get("id") != context.last_message:
             context.turns += 1
