@@ -36,7 +36,7 @@ import metering
 import usage
 
 
-def prompt_for(arguments: argparse.Namespace) -> str:
+def prompt_for(arguments: argparse.Namespace, worktree: Path, note: Path | None) -> str:
     number = arguments.number
     if arguments.agent_type.startswith("reviewer"):
         review = "second" if arguments.second_review else "first"
@@ -44,13 +44,7 @@ def prompt_for(arguments: argparse.Namespace) -> str:
     if arguments.agent_type == "researcher":
         return f"Answer research issue #{number}."
     if arguments.successor:
-        note = usage.LOOP / "handoff" / f"issue-{number}.md"
-        if not note.exists():
-            return (
-                f"Continue issue #{number}. The builder before you stopped without a hand-off note, and its work is on "
-                "your branch. Start from `git log` and the issue."
-            )
-        return f"Continue issue #{number}. The builder before you handed off with this note:\n\n{note.read_text()}"
+        return launching.successor_message(number, note, launching.branch_commits(worktree))
     return f"Build issue #{number}."
 
 
@@ -77,9 +71,11 @@ def resume(arguments: argparse.Namespace) -> int:
     account = next(a for a in usage.accounts() if a.name == record["account"])
     worktree = Path(record["worktree"])
     if not worktree.exists():
-        branch = f"issue-{record['number']}" if launching.built(record) else None
-        worktree = launching.make_worktree(record["id"], branch, continues=True)
+        issue = record["number"] if launching.built(record) else None
+        worktree = launching.make_worktree(record["id"], issue, continues=True)
     session = launching.start(account, record["name"], record["id"], worktree, arguments.message, record["session"])
+    if launching.built(record):
+        session.note = launching.note_for(record["number"], continues=True)
     return run(session, {**record, "started": time.time(), "pid": os.getpid(), "worktree": str(worktree)})
 
 
@@ -120,14 +116,18 @@ def main() -> int:
     }
     # Saved before the agent starts, so that the meter counts it for a launch that comes right after this one.
     usage.save_agent(record)
-    branch = f"issue-{arguments.number}" if record["builds"] else None
+    issue = arguments.number if record["builds"] else None
     try:
-        launching.make_worktree(agent_id, branch, continues=arguments.successor)
+        launching.make_worktree(agent_id, issue, continues=arguments.successor)
     except SystemExit:
         # The agent never started, so the meter mustn't count it.
         (usage.AGENTS / f"{agent_id}.json").unlink()
         raise
-    session = launching.start(account, arguments.agent_type, agent_id, worktree, prompt_for(arguments), session_id)
+    note = launching.note_for(arguments.number, arguments.successor) if issue else None
+    session = launching.start(
+        account, arguments.agent_type, agent_id, worktree, prompt_for(arguments, worktree, note), session_id
+    )
+    session.note = note
     return run(session, record)
 
 
