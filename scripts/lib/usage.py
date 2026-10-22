@@ -1,5 +1,6 @@
 """The loop's accounts, their usage readings and the agents running on them, all kept in `.loop/`."""
 
+import contextlib
 import json
 import os
 import select
@@ -203,7 +204,7 @@ def read_rate_limits(server: subprocess.Popen) -> dict[str, dict]:
 
 def running_agents() -> list[dict]:
     """The agents that scripts/launch started and that still run, oldest first. An agent whose launcher has gone
-    without saying so, such as after a crash, is marked as stopped."""
+    without saying so, such as after a crash, is ended, which can take up to STOP_SECONDS, and marked as stopped."""
     if not AGENTS.exists():
         return []
     running = []
@@ -226,13 +227,16 @@ def end(pid: int, program: str) -> None:
     """Stops the process if it runs `program`, and kills it if it hasn't stopped within STOP_SECONDS."""
     if not is_running(pid, program):
         return
-    os.kill(pid, signal.SIGTERM)
-    deadline = time.time() + STOP_SECONDS
-    while time.time() < deadline:
-        if not is_running(pid, program):
-            return
-        time.sleep(0.2)
-    os.kill(pid, signal.SIGKILL)
+    # The process can end between the check and the signal, such as when the watcher and scripts/status end the
+    # same agent at once.
+    with contextlib.suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + STOP_SECONDS
+        while time.time() < deadline:
+            if not is_running(pid, program):
+                return
+            time.sleep(0.2)
+        os.kill(pid, signal.SIGKILL)
 
 
 def is_running(pid: int, program: str) -> bool:

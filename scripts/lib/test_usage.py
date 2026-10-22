@@ -106,6 +106,13 @@ class RunningAgentsTest(unittest.TestCase):
             self.assertEqual(usage.running_agents(), [])
         self.assertEqual(child.wait(timeout=5), -signal.SIGKILL)
 
+    def test_an_agent_that_ends_just_before_it_is_told_to_stop_counts_as_stopped(self):
+        self.orphan("import time; time.sleep(30)")
+        # The signal finds no process, as when the agent ends between the check and the signal.
+        with mock.patch.object(usage.os, "kill", side_effect=ProcessLookupError):
+            self.assertEqual(usage.running_agents(), [])
+        self.assertIn("stopped", json.loads((usage.AGENTS / "builder-1-test.json").read_text()))
+
 
 if __name__ == "__main__":
     unittest.main()
