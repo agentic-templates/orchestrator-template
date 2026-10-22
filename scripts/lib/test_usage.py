@@ -53,6 +53,26 @@ class IsRunningTest(unittest.TestCase):
         self.assertTrue(usage.is_running(started.pid, "sleep"))
 
 
+class ReserveTest(unittest.TestCase):
+    def accounts(self, items: list[dict]) -> list[usage.Account]:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "accounts.json"
+            path.write_text(json.dumps(items))
+            with mock.patch.object(usage, "ACCOUNTS", path):
+                return usage.accounts()
+
+    def test_an_account_without_a_reserve_keeps_none(self):
+        self.assertEqual(self.accounts([{"name": "claude", "provider": "claude"}])[0].reserve, 0.0)
+
+    def test_a_reserve_below_the_whole_window_is_kept(self):
+        self.assertEqual(self.accounts([{"name": "claude", "provider": "claude", "reserve": 99.9}])[0].reserve, 99.9)
+
+    def test_a_negative_reserve_or_the_whole_window_is_refused(self):
+        for reserve in (-5, 100):
+            with self.subTest(reserve=reserve), self.assertRaises(SystemExit):
+                self.accounts([{"name": "claude", "provider": "claude", "reserve": reserve}])
+
+
 class CommandForTest(unittest.TestCase):
     def test_the_default_account_drops_a_config_folder_from_the_environment(self):
         account = usage.Account("claude", "claude", None)

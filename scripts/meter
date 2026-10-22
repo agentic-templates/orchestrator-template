@@ -8,8 +8,9 @@ usage: scripts/meter
 
 It reads each account's usage from .loop/usage/, and takes a fresh reading of an account whose last one is old,
 or that agents started on since. When agents must wind down, it tells the newest ones first, through a notice
-that the notice hook shows them. The orchestrator's account is used last, and keeps a reserve for the
-orchestrator. scripts/watch runs the same decisions every minute.
+that the notice hook shows them. The orchestrator's account is used last. An account in .loop/accounts.json can set
+"reserve", the percent of each window that the loop leaves alone for your own use, such as 20. scripts/watch runs
+the same decisions every minute.
 """
 
 import sys

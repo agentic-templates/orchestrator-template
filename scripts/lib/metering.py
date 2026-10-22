@@ -1,5 +1,6 @@
 """The meter's decisions for every account, from their readings and the agents that run on them."""
 
+import json
 import math
 import shutil
 import time
@@ -17,19 +18,12 @@ STALE_IDLE_SECONDS = meter.STALE_MINUTES * 60
 # account of any other provider, it would start a Claude agent on the orchestrator's account, and the meter would
 # count that agent's usage against the wrong account.
 LAUNCHABLE_PROVIDERS = {"claude"}
-# Percent of a window kept back on the orchestrator's account, so that it can still coordinate the other
-# accounts while its own fills up.
-ORCHESTRATOR_RESERVE = 5.0
 
 
 def reaction_minutes(running: list[dict]) -> float:
     """How long the running agents' models have taken to stop after a notice: the slowest of them."""
     configs = {agent["config"] for agent in running} or {"default"}
     return max(measurements.median_or(f"reaction/{c}", meter.DEFAULT_REACTION_MINUTES) for c in configs)
-
-
-def reserve_for(account: str) -> float:
-    return ORCHESTRATOR_RESERVE if account == usage.orchestrator_account() else 0.0
 
 
 def latest_reading(account: str) -> float:
@@ -53,7 +47,11 @@ WIND_DOWN = (
 
 
 def tell_to_wind_down(agents: list[dict], count: int) -> None:
-    for agent in [agent for agent in agents if "told_to_wind_down" not in agent][-count:] if count else []:
+    """Tells the newest agents that haven't been told yet, until `count` of the running agents have been told. The
+    decisions run several times a minute, and an agent that was told keeps running until its next stopping point."""
+    untold = [agent for agent in agents if "told_to_wind_down" not in agent]
+    count -= len(agents) - len(untold)
+    for agent in untold[-count:] if count > 0 else []:
         usage.notify(agent["id"], "wind-down", WIND_DOWN)
         agent["told_to_wind_down"] = time.time()
         usage.save_agent(agent)
@@ -72,9 +70,19 @@ def clear_old_notices(running: list[dict]) -> None:
         usage.NOTICES.rmdir()
 
 
+def recent_agents(since: float) -> list[dict]:
+    """The agents that ran after `since`, stopped or not."""
+    if not usage.AGENTS.exists():
+        return []
+    agents = [json.loads(path.read_text()) for path in usage.AGENTS.glob("*.json")]
+    return [agent for agent in agents if agent.get("stopped", since) >= since]
+
+
 def decisions() -> dict[str, meter.Decision]:
     running = usage.running_agents()
     clear_old_notices(running)
+    # As far back as the readings go, because the meter may look back to the last readings with agents in them.
+    recent = recent_agents(time.time() - usage.KEEP_SECONDS)
     result = {}
     for account in usage.accounts():
         on_account = [agent for agent in running if agent["account"] == account.name]
@@ -89,8 +97,9 @@ def decisions() -> dict[str, meter.Decision]:
             agents=len(on_account),
             reaction=reaction_minutes(on_account),
             interval=CHECK_SECONDS / 60,
-            reserve=reserve_for(account.name),
+            reserve=account.reserve,
             measured_since_last_start=all(agent["started"] < latest for agent in on_account),
+            runs=tuple((a["started"], a.get("stopped")) for a in recent if a["account"] == account.name),
         )
         decision = meter.decide(windows, time.time(), load)
         tell_to_wind_down(on_account, decision.wind_down)
