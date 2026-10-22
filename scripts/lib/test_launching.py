@@ -1,3 +1,4 @@
+import json
 import unittest
 
 import launching
@@ -55,6 +56,15 @@ class ChooseAccountTest(unittest.TestCase):
         account, reason = launching.choose_account(decisions(1, 1), ACCOUNTS, "claude-9", force=False)
         self.assertIsNone(account)
         self.assertIn("No account is called claude-9", reason)
+
+
+class SettingsTest(unittest.TestCase):
+    def test_the_sandbox_lets_an_agent_write_only_its_own_uv_cache(self):
+        writable = json.loads(launching.settings())["sandbox"]["filesystem"]["allowWrite"]
+        self.assertEqual(writable, [str(launching.UV_CACHE)])
+
+    def test_an_agent_cant_run_a_command_outside_the_sandbox(self):
+        self.assertIs(json.loads(launching.settings())["sandbox"]["allowUnsandboxedCommands"], False)
 
 
 if __name__ == "__main__":

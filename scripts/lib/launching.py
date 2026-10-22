@@ -16,6 +16,9 @@ import usage
 
 ROOT = usage.ROOT
 WORKTREES = usage.LOOP / "worktrees"
+# Agents' own uv cache and tools. The scripts and hooks that run outside the sandbox use the default cache and Python, which
+# agents may only read, so that nothing an agent writes runs outside the sandbox.
+UV_CACHE = usage.LOOP / "agent-uv-cache"
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
 
@@ -81,9 +84,13 @@ def make_worktree(agent_id: str, branch: str | None = None, continues: bool = Fa
 def settings() -> str:
     """The project's permissions and sandbox, given again on the command line. A headless session loads the
     project's own settings from its worktree, but ignores their allow rules in a folder its account hasn't
-    trusted."""
+    trusted. The sandbox also lets the agent write its own uv cache, and the agent can't ask to run a command
+    outside it, because the allow rules would approve that without asking."""
     project = json.loads((ROOT / ".claude" / "settings.json").read_text())
-    return json.dumps({"permissions": project["permissions"], "sandbox": project["sandbox"]})
+    sandbox = project["sandbox"] | {"allowUnsandboxedCommands": False}
+    filesystem = sandbox.setdefault("filesystem", {})
+    filesystem["allowWrite"] = [*filesystem.get("allowWrite", []), str(UV_CACHE)]
+    return json.dumps({"permissions": project["permissions"], "sandbox": sandbox})
 
 
 def transcript_path(account: usage.Account, worktree: Path, session_id: str) -> Path:
@@ -102,7 +109,14 @@ def start(
     os.mkfifo(input_path)
     # Opened for reading and writing, so that the agent's input stays open between messages.
     input_fd = os.open(input_path, os.O_RDWR)
-    environment = usage.environment_for(account) | {"LOOP_AGENT_ID": agent_id, "DISABLE_AUTO_COMPACT": "1"}
+    environment = usage.environment_for(account) | {
+        "LOOP_AGENT_ID": agent_id,
+        "DISABLE_AUTO_COMPACT": "1",
+        # The hooks run outside the sandbox, so they run from the main checkout, never from the agent's own copy.
+        "LOOP_ROOT": str(ROOT),
+        "UV_CACHE_DIR": str(UV_CACHE),
+        "UV_TOOL_DIR": str(UV_CACHE / "tools"),
+    }
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
         "--verbose", "--settings", settings(), "--name", agent_id,
