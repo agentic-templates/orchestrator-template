@@ -2,7 +2,6 @@
 
 import json
 import subprocess
-import tempfile
 import time
 from pathlib import Path
 
@@ -163,34 +162,3 @@ def check_stalled(state: dict) -> list[str]:
             events.append(f"{agent['name']} ({agent['id']}) has done nothing for {idle / 60:.0f} minutes.")
     state["stalled"] = sorted(reported)
     return events
-
-
-def check_models(state: dict) -> list[str]:
-    """Opens a `loop` issue when an agent type starts running a model it hasn't run before, such as when an alias
-    like "opus" moves to a newer model."""
-    seen = state.setdefault("models", {})
-    known = contexts.load(CONTEXTS)
-    events = []
-    for _, agent_type, transcript, _ in sessions():
-        model = known.get(str(transcript), contexts.Context()).model
-        if not model or seen.get(agent_type) == model:
-            continue
-        if agent_type in seen:
-            events.append(open_model_issue(agent_type, seen[agent_type], model))
-        seen[agent_type] = model
-    return events
-
-
-def open_model_issue(agent_type: str, old: str, new: str) -> str:
-    body = (
-        f"## What should change\n\n`{agent_type}` keeps its model and effort only if its model tests show {new} does "
-        f"as well as {old} at the same or lower cost.\n\n## Why\n\n`{agent_type}` now runs {new}, where it ran "
-        f"{old}, so the results that chose its model no longer apply.\n\n## Done when\n\n- A comment gives the "
-        "model tests' results for the new model, and a recommendation.\n"
-    )
-    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as file:
-        file.write(body)
-    title = f"Rerun the model tests of {agent_type}, which now runs {new}"
-    command = [str(ROOT / "scripts" / "new-issue"), "--title", title, "--body-file", file.name]
-    subprocess.run([*command, "--label", "loop", "--label", "research"], capture_output=True, check=False)
-    return f"{agent_type} now runs {new}, where it ran {old}. A loop issue asks to rerun its model tests."

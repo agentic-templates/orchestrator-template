@@ -14,7 +14,6 @@ The orchestrator runs it in the background, and its exit wakes the orchestrator.
 - retries a refresh that hasn't happened, once, and has the orchestrator tell the maintainer if the retry fails too
 - reports pull requests that merged, opened or failed their checks, and agents that have done nothing for a while
 - ends agents whose launcher has gone, such as after a crash
-- opens a `loop` issue when an agent type starts running a model it hasn't run before
 
 It also exits after 50 minutes, so that the orchestrator's prompt cache, which lasts an hour, stays warm.
 """
@@ -42,7 +41,6 @@ def check(state: dict, actions: dict[str, str]) -> list[str]:
     events += watching.check_refresh(state)
     events += watching.check_pull_requests(state)
     events += watching.check_stalled(state)
-    events += watching.check_models(state)
     return events
 
 
