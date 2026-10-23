@@ -221,14 +221,26 @@ def settings() -> str:
     # A path that may be a file or a folder is denied both ways.
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
     deny = project["permissions"]["deny"]
-    # The project's rules for files in any of its folders, such as .env files, apply inside the agent's worktree,
-    # which has none. The maintainer's are in the main checkout.
-    main_checkout = f"Read({rule_path(ROOT)}/**/"
-    rules += [main_checkout + rule.removeprefix("Read(**/") for rule in deny if rule.startswith("Read(**/")]
+    # The project's rules for its own files, such as .env files, apply inside the agent's worktree, which has none.
+    # The maintainer's are in the main checkout.
+    rules += [rule for rule in map(in_main_checkout, deny) if rule]
     permissions = project["permissions"] | {"deny": deny + rules}
     credentials = sandbox.setdefault("credentials", {})
     credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]
     return json.dumps({"permissions": permissions, "sandbox": sandbox})
+
+
+def in_main_checkout(rule: str) -> str | None:
+    """The project's rule against reading some of its own files, for the same files in the main checkout. Other
+    rules, and rules for paths from the home folder or absolute ones, give None."""
+    if not rule.startswith("Read(") or rule.startswith(("Read(~", "Read(//")):
+        return None
+    pattern = rule.removeprefix("Read(")
+    # In .gitignore, which the rules follow, a pattern without a slash matches in every folder. Denying it in every
+    # folder is safe even where Claude Code differs.
+    if "/" not in pattern:
+        pattern = f"**/{pattern}"
+    return f"Read({rule_path(ROOT)}/{pattern.removeprefix('./').removeprefix('/')}"
 
 
 def secret_paths() -> list[Path]:

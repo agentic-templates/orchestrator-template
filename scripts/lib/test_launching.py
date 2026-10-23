@@ -94,17 +94,25 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse([rule for rule in denied if "/.config/gh" in rule or rule.startswith("Read(~/.config/git/**")])
         self.assertIn({"path": "~/.claude-2", "mode": "deny"}, settings["sandbox"]["credentials"]["files"])
 
-    def test_an_agent_cant_read_the_files_the_project_denies_in_any_folder_of_the_main_checkout(self):
+    def test_an_agent_cant_read_the_files_the_project_denies_in_the_main_checkout(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         main = Path(folder.name)
         (main / ".claude").mkdir()
-        project = {"permissions": {"deny": ["Read(**/.env)", "Read(~/.ssh/**)"]}, "sandbox": {}}
-        (main / ".claude" / "settings.json").write_text(json.dumps(project))
+        deny = [
+            "Read(**/.env)",
+            "Read(./.env.*)",
+            "Read(/secrets/**)",
+            "Read(key.pem)",
+            "Read(~/.ssh/**)",
+            "Bash(rm *)",
+        ]
+        (main / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"deny": deny}, "sandbox": {}}))
         with mock.patch.object(launching, "ROOT", main):
             denied = json.loads(launching.settings())["permissions"]["deny"]
         in_main = [rule for rule in denied if rule.startswith(f"Read(/{main}/")]
-        self.assertEqual(in_main, [f"Read(/{main}/**/.env)"])
+        expected = [f"Read(/{main}/{path})" for path in ("**/.env", ".env.*", "secrets/**", "**/key.pem")]
+        self.assertEqual(in_main, expected)
 
 
 def run_git(cwd: Path, *args: str) -> str:
