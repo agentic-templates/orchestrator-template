@@ -37,7 +37,6 @@ class Session:
     worktree: Path
     process: subprocess.Popen
     input_path: Path
-    transcript: Path
     report: str = ""
     reported: bool = False
     last_output: float = field(default_factory=time.time)
@@ -177,16 +176,10 @@ def settings() -> str:
     return json.dumps({"permissions": project["permissions"], "sandbox": sandbox})
 
 
-def transcript_path(account: usage.Account, worktree: Path, session_id: str) -> Path:
-    home = Path(usage.environment_for(account).get("CLAUDE_CONFIG_DIR", Path.home() / ".claude"))
-    return home / "projects" / str(worktree).replace("/", "-").replace(".", "-") / f"{session_id}.jsonl"
-
-
 def start(
     account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str, session_id: str
 ) -> Session:
     """Starts the agent's session, or continues it with its whole context if it has run before."""
-    transcript = transcript_path(account, worktree, session_id)
     input_path = usage.AGENTS / f"{agent_id}.input"
     usage.AGENTS.mkdir(parents=True, exist_ok=True)
     input_path.unlink(missing_ok=True)
@@ -204,12 +197,12 @@ def start(
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
         "--verbose", "--settings", settings(), "--name", agent_id,
-        *(["--resume", session_id] if transcript.exists() else ["--session-id", session_id]),
+        *(["--resume", session_id] if usage.transcript(account.name, session_id) else ["--session-id", session_id]),
     ]  # fmt: skip
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
-    session = Session(agent_id, session_id, account.name, worktree, process, input_path, transcript)
+    session = Session(agent_id, session_id, account.name, worktree, process, input_path)
     send(input_path, prompt)
     return session
 
@@ -238,6 +231,7 @@ def handle(session: Session, line: bytes) -> None:
         # A session can give several results, such as after a background command finishes. The last one counts.
         session.report = event.get("result", "")
         session.reported = True
+        usage.record_context_windows(session.account, event.get("modelUsage") or {})
 
 
 def runs_background_commands(process: subprocess.Popen) -> bool:

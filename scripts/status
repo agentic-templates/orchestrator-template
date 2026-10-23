@@ -11,7 +11,6 @@ needs. It touches only the worktrees in .loop/worktrees, never your own.
 """
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import github
 import launching
 import usage
+import watching
 
 ROOT = Path(__file__).resolve().parent.parent
 AGENTS = ROOT / ".loop" / "agents"
@@ -97,8 +97,8 @@ def tend_worktree(tree: dict, running: dict, save: bool) -> str:
 
 def is_builders(worktree: Path) -> bool:
     """Whether a builder worked in the worktree, as far as anyone knows. The launcher names it after the agent."""
-    record = usage.AGENTS / f"{worktree.name}.json"
-    return not record.exists() or launching.built(json.loads(record.read_text()))
+    record = usage.agent_record(worktree.name)
+    return record is None or launching.built(record)
 
 
 def tend_worktrees(save: bool) -> list[str]:
@@ -117,13 +117,11 @@ def tend_worktrees(save: bool) -> list[str]:
 
 
 def pull_requests() -> list[str]:
-    prs = github.gh_json(
-        "pr", "list", "--state", "open", "--json", "number,title,isDraft,autoMergeRequest,statusCheckRollup,reviews"
-    )
+    fields = "number,title,isDraft,autoMergeRequest,statusCheckRollup,reviews"
+    prs = github.gh_json("pr", "list", "--limit", str(watching.PULL_REQUEST_LIMIT), "--json", fields)
     lines = []
     for pr in prs or []:
-        states = {check.get("conclusion") or check.get("status") for check in pr["statusCheckRollup"]}
-        checks = "failing" if "FAILURE" in states else "passing" if states <= {"SUCCESS", "SKIPPED"} else "running"
+        checks = watching.checks_state(pr)
         merge = "draft" if pr["isDraft"] else "auto-merge on" if pr["autoMergeRequest"] else "auto-merge off"
         lines.append(f"- #{pr['number']} {pr['title']}: checks {checks}, {merge}, {len(pr['reviews'])} reviews")
     return lines

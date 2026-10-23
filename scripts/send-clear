@@ -175,7 +175,7 @@ def clear(pane: str) -> None:
 
 def main() -> int:
     argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
-    if PID.exists() and usage.is_running(int(PID.read_text()), "send-clear"):
+    if (pid := usage.pid_in(PID)) and usage.is_running(pid, "send-clear"):
         return 0
     PID.write_text(str(os.getpid()))
     try:

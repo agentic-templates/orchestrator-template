@@ -2,8 +2,10 @@
 request still holds."""
 
 import json
+import os
 import re
 import time
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 
@@ -27,8 +29,8 @@ LONG_STATE = 6_000
 SEVERAL_REFERENCES = 3
 REFERENCE = re.compile(r"(?<![\w&])#(\d+)\b")
 HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
-# The end of a transcript that is read to find whether a turn is running, enough for several turns.
-TAIL_BYTES = 512 * 1024
+# How much of a transcript is read at a time, from its end, to find the latest turn's start or end.
+CHUNK_BYTES = 256 * 1024
 COMMAND_TAGS = ("<command-name>", "<local-command")
 
 CHECKLIST = """\
@@ -71,7 +73,7 @@ def findings(text: str, closed: set[int]) -> list[str]:
 
 
 def request(transcript: str | None) -> None:
-    REQUEST.write_text(json.dumps({"time": time.time(), "transcript": transcript}))
+    usage.write_atomically(REQUEST, json.dumps({"time": time.time(), "transcript": transcript}))
     characters = len(STATE.read_text()) if STATE.exists() else 0
     is_long = characters > LONG_STATE
     count = int(LONG_STATES.read_text()) + 1 if is_long and LONG_STATES.exists() else int(is_long)
@@ -87,17 +89,18 @@ def load_request() -> dict | None:
 
 
 def clear() -> None:
-    """Forgets the request and the checklist, as a new session starts."""
+    """Forgets the request, the checklist and the notices of the session before, as a new session starts. That
+    session was told about its own context, and the new one has to be told again."""
     for path in (REQUEST, CHECKED, WAITING, FAILED):
         path.unlink(missing_ok=True)
+    usage.forget_notices(usage.ORCHESTRATOR_ID)
 
 
 def tool_calls_since(transcript: Path, since: float) -> bool:
     """Whether the session called a tool after `since`, by the times its transcript gives each message."""
     if not transcript.exists():
         return False
-    for line in transcript.read_bytes().splitlines():
-        entry = json.loads(line) if line.startswith(b"{") else {}
+    for entry in usage.json_lines(transcript.read_bytes().splitlines()):
         if entry.get("type") != "assistant" or not entry.get("timestamp"):
             continue
         content = (entry.get("message") or {}).get("content") or []
@@ -111,21 +114,58 @@ def turn_running(transcript: Path) -> bool:
     """Whether the session is in the middle of a turn: its last prompt, which includes a task notification, came
     after its last turn ended. Claude Code doesn't show its spinner while it writes a long answer, so the screen
     alone can't tell."""
-    if not transcript.exists():
+    for entry in entries_backwards(transcript):
+        if is_prompt(entry):
+            return True
+        if is_turn_end(entry):
+            return False
+    return False
+
+
+def is_prompt(entry: dict) -> bool:
+    """Whether the entry starts a turn. A command's output, such as /context's, can count as a prompt, and so can an
+    interrupted turn's last one, which no turn end follows. The refresh then waits for the session's next turn to
+    end, rather than risk typing /clear into a turn."""
+    content = (entry.get("message") or {}).get("content")
+    if entry.get("type") != "user":
         return False
-    with open(transcript, "rb") as file:
-        file.seek(max(0, transcript.stat().st_size - TAIL_BYTES))
-        lines = file.read().splitlines()
-    last_prompt = last_end = ""
-    for line in lines:
-        entry = json.loads(line) if line.startswith(b"{") else {}
-        content = (entry.get("message") or {}).get("content")
+    if isinstance(content, str):
         # A slash command such as /clear is recorded like a prompt, but no turn follows it.
-        if entry.get("type") == "user" and isinstance(content, str) and not content.startswith(COMMAND_TAGS):
-            last_prompt = entry.get("timestamp", "")
-        elif entry.get("type") == "system" and entry.get("subtype") == "turn_duration":
-            last_end = entry.get("timestamp", "")
-    return last_prompt > last_end
+        return not content.startswith(COMMAND_TAGS)
+    # A prompt with an image is a list of blocks, and so are tool results.
+    blocks = [block for block in content or [] if isinstance(block, dict)]
+    return bool(blocks) and all(block.get("type") != "tool_result" for block in blocks)
+
+
+def last_turn_end(transcript: Path) -> float | None:
+    """When the session's last turn ended, if one has."""
+    for entry in entries_backwards(transcript):
+        if is_turn_end(entry) and "timestamp" in entry:
+            return datetime.fromisoformat(entry["timestamp"]).timestamp()
+    return None
+
+
+def is_turn_end(entry: dict) -> bool:
+    return entry.get("type") == "system" and entry.get("subtype") == "turn_duration"
+
+
+def entries_backwards(transcript: Path) -> Iterator[dict]:
+    """The transcript's entries from the last to the first, read from the end a chunk at a time, so that finding the
+    latest turn costs as much as that turn's length, however long the transcript is."""
+    if not transcript.exists():
+        return
+    with open(transcript, "rb") as file:
+        position = file.seek(0, os.SEEK_END)
+        # The start of the chunk read last, which may be part of a line that starts in the chunk before it.
+        partial = b""
+        while position > 0:
+            size = min(CHUNK_BYTES, position)
+            position -= size
+            file.seek(position)
+            lines = (file.read(size) + partial).split(b"\n")
+            partial = lines[0]
+            yield from reversed(usage.json_lines(lines[1:]))
+        yield from usage.json_lines([partial])
 
 
 def is_cancelled(saved: dict) -> bool:

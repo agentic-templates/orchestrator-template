@@ -63,7 +63,7 @@ def take_over(provider: str) -> None:
         "pid": pid,
         "started": pid and usage.started_at(pid),
     }
-    usage.ORCHESTRATOR.write_text(json.dumps(record))
+    usage.write_atomically(usage.ORCHESTRATOR, json.dumps(record))
     refreshing.clear()
 
 

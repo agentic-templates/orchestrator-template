@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import metering
 import usage
 
 
@@ -155,6 +156,84 @@ class RunningAgentsTest(unittest.TestCase):
             usage.end_orphans()
         self.assertEqual(usage.running_agents(), [])
         self.assertIn("stopped", json.loads((usage.AGENTS / "builder-1-test.json").read_text()))
+
+
+class TempLoopTest(unittest.TestCase):
+    """Points the loop's files at a fresh folder."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.root = Path(folder.name)
+        for name, path in {
+            "USAGE": self.root / "usage",
+            "AGENTS": self.root / "agents",
+            "NOTICES": self.root / "notices",
+            "CONTEXT_WINDOWS": self.root / "context-windows.json",
+            "ACCOUNTS": self.root / "accounts.json",
+        }.items():
+            patch = mock.patch.object(usage, name, path)
+            patch.start()
+            self.addCleanup(patch.stop)
+
+
+class WindowsTest(TempLoopTest):
+    def test_a_line_still_being_written_is_left_out(self):
+        (self.root / "usage").mkdir()
+        line = json.dumps({"time": time.time(), "window": "five_hour", "used": 40.0, "resets_at": 0})
+        (self.root / "usage" / "claude.jsonl").write_text(line + '\n{"time": 17')
+        self.assertEqual([r.used for r in usage.windows("claude")["five_hour"]], [40.0])
+
+
+class AgentRecordsTest(TempLoopTest):
+    def setUp(self):
+        super().setUp()
+        (self.root / "agents").mkdir()
+        # A record that a failed launch deletes between the listing and the reading.
+        (self.root / "agents" / "builder-1-gone.json").symlink_to(self.root / "deleted.json")
+
+    def test_a_record_deleted_while_the_agents_are_listed_is_skipped(self):
+        self.assertEqual(usage.running_agents(), [])
+
+    def test_the_meter_skips_it_too(self):
+        self.assertEqual(metering.recent_agents(0), [])
+
+
+class NoticesTest(TempLoopTest):
+    def test_a_notice_still_being_written_isnt_shown(self):
+        (self.root / "notices" / "builder-1-a").mkdir(parents=True)
+        (self.root / "notices" / "builder-1-a" / ".wind-down.x7k2").write_text("")
+        self.assertEqual(usage.untold_notices("builder-1-a"), [])
+
+
+class ContextWindowsTest(TempLoopTest):
+    def test_a_window_is_known_for_the_account_once_a_turn_on_the_model_has_ended_there(self):
+        self.assertIsNone(usage.context_window("claude", "claude-haiku-5-5"))
+        usage.record_context_windows("claude", {"claude-haiku-5-5": {"contextWindow": 200_000}})
+        usage.record_context_windows("claude-2", {"claude-haiku-5-5": {"contextWindow": 1_000_000}})
+        self.assertEqual(usage.context_window("claude", "claude-haiku-5-5"), 200_000)
+        self.assertEqual(usage.context_window("claude-2", "claude-haiku-5-5"), 1_000_000)
+
+
+class TranscriptTest(TempLoopTest):
+    def setUp(self):
+        super().setUp()
+        self.home = self.root / "claude-2-home"
+        (self.root / "accounts.json").write_text(
+            json.dumps([{"name": "claude-2", "provider": "claude", "home": str(self.home)}])
+        )
+
+    def test_is_found_whatever_claude_code_named_its_folder(self):
+        folder = self.home / "projects" / "-Users-x-dev-my-project--loop-worktrees-builder-1-a1b2c3"
+        folder.mkdir(parents=True)
+        (folder / "session-1.jsonl").write_text("")
+        self.assertEqual(usage.transcript("claude-2", "session-1"), folder / "session-1.jsonl")
+
+    def test_a_session_that_hasnt_written_one_yet_has_none(self):
+        self.assertIsNone(usage.transcript("claude-2", "session-1"))
+
+    def test_an_account_that_isnt_listed_has_none(self):
+        self.assertIsNone(usage.transcript("claude-3", "session-1"))
 
 
 if __name__ == "__main__":
