@@ -273,12 +273,7 @@ def start(
         *(["--resume", session_id] if usage.transcript(account.name, session_id) else ["--session-id", session_id]),
     ]  # fmt: skip
     process = subprocess.Popen(
-        command,
-        cwd=worktree,
-        env=environment,
-        stdin=input_fd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
     send(input_path, prompt)
