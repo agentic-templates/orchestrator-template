@@ -30,8 +30,6 @@ SECRETS = (
     ".netrc", ".npmrc", ".docker", ".kube", ".git-credentials", ".config/git/credentials", ".zsh_history",
     ".zsh_sessions", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history",
 )  # fmt: skip
-# Where a project keeps its secrets, as AGENTS.md and the common frameworks name them.
-ENV_FILES = (".env", ".env.local", ".env.*.local")
 # The folders in ~/.config that agents' commands need. Agents read no other. Git stops when it can't read its own.
 CONFIG_NEEDED = ("gh", "git")
 # The agent counts as done once nothing has come from it for this long after its report.
@@ -222,10 +220,12 @@ def settings() -> str:
     secrets = [rule_path(path) for path in secret_paths()]
     # A path that may be a file or a folder is denied both ways.
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
-    # The project's own rules for .env files apply inside the agent's worktree, which has none. The maintainer's are
-    # in the main checkout.
-    rules += [f"Read({rule_path(ROOT)}/**/{name})" for name in ENV_FILES]
-    permissions = project["permissions"] | {"deny": project["permissions"]["deny"] + rules}
+    deny = project["permissions"]["deny"]
+    # The project's rules for files in any of its folders, such as .env files, apply inside the agent's worktree,
+    # which has none. The maintainer's are in the main checkout.
+    main_checkout = f"Read({rule_path(ROOT)}/**/"
+    rules += [main_checkout + rule.removeprefix("Read(**/") for rule in deny if rule.startswith("Read(**/")]
+    permissions = project["permissions"] | {"deny": deny + rules}
     credentials = sandbox.setdefault("credentials", {})
     credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]
     return json.dumps({"permissions": permissions, "sandbox": sandbox})

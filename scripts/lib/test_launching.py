@@ -81,7 +81,6 @@ class SettingsTest(unittest.TestCase):
         accounts.write_text(json.dumps([{"name": "claude-2", "provider": "claude", "home": str(home / ".claude-2")}]))
         with mock.patch.object(Path, "home", lambda: home), mock.patch.object(launching.usage, "ACCOUNTS", accounts):
             settings = json.loads(launching.settings())
-            main_env = f"Read({launching.rule_path(launching.ROOT)}/**/.env)"
         denied = settings["permissions"]["deny"]
         expected = [
             "Read(~/.netrc)",
@@ -89,12 +88,23 @@ class SettingsTest(unittest.TestCase):
             "Read(~/.config/anthropic/**)",
             "Read(~/.claude-2/**)",
             "Read(~/.claude.json)",
-            main_env,
         ]
         for rule in expected:
             self.assertIn(rule, denied)
         self.assertFalse([rule for rule in denied if "/.config/gh" in rule or rule.startswith("Read(~/.config/git/**")])
         self.assertIn({"path": "~/.claude-2", "mode": "deny"}, settings["sandbox"]["credentials"]["files"])
+
+    def test_an_agent_cant_read_the_files_the_project_denies_in_any_folder_of_the_main_checkout(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        main = Path(folder.name)
+        (main / ".claude").mkdir()
+        project = {"permissions": {"deny": ["Read(**/.env)", "Read(~/.ssh/**)"]}, "sandbox": {}}
+        (main / ".claude" / "settings.json").write_text(json.dumps(project))
+        with mock.patch.object(launching, "ROOT", main):
+            denied = json.loads(launching.settings())["permissions"]["deny"]
+        in_main = [rule for rule in denied if rule.startswith(f"Read(/{main}/")]
+        self.assertEqual(in_main, [f"Read(/{main}/**/.env)"])
 
 
 def run_git(cwd: Path, *args: str) -> str:
@@ -115,8 +125,9 @@ class NestedRepositoryTest(unittest.TestCase):
             run_git(root / "main", "config", key, value)
         run_git(root / "main", "commit", "--quiet", "--allow-empty", "-m", "start")
         run_git(root / "main", "push", "--quiet", "origin", "HEAD:main")
+        self.main = root / "main"
         self.worktree = root / "worktree"
-        run_git(root / "main", "worktree", "add", "--quiet", "-b", "issue-1", str(self.worktree))
+        run_git(self.main, "worktree", "add", "--quiet", "-b", "issue-1", str(self.worktree))
         self.marker = root / "marker"
         self.nested = self.worktree / "vendor" / "repo"
         self.nested.mkdir(parents=True)
@@ -134,7 +145,8 @@ class NestedRepositoryTest(unittest.TestCase):
         self.assertEqual(self.committed(), ["new.py"])
         self.assertFalse(self.marker.exists())
 
-    def test_a_nested_repository_the_agent_staged_runs_nothing_when_the_work_is_saved(self):
+    def stage_nested(self) -> None:
+        """Commits the nested repository into the worktree as a gitlink, then changes it."""
         for key, value in (("user.name", "Test"), ("user.email", "test@example.com"), ("commit.gpgsign", "false")):
             run_git(self.nested, "config", key, value)
         run_git(self.nested, "add", "--all")
@@ -143,8 +155,20 @@ class NestedRepositoryTest(unittest.TestCase):
         run_git(self.worktree, "commit", "--quiet", "-m", "add the repository")
         self.marker.unlink(missing_ok=True)
         (self.nested / "file").write_text("changed\n")
+
+    def test_a_nested_repository_the_agent_staged_runs_nothing_when_the_work_is_saved_and_removed(self):
+        self.stage_nested()
         self.assertEqual(launching.save_work(self.worktree), "")
         self.assertIn("new.py", self.committed())
+        with mock.patch.dict(launching.git.__kwdefaults__, {"cwd": self.main}):
+            launching.remove_worktree(self.worktree)
+        self.assertFalse(self.worktree.exists())
+        self.assertFalse(self.marker.exists())
+
+    def test_a_nested_repository_the_agent_staged_runs_nothing_when_git_reads_the_worktree(self):
+        self.stage_nested()
+        run_git(self.nested, "config", "core.fsmonitor", f"touch {self.marker}; false")
+        launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
     def test_a_worktree_with_only_a_nested_repository_has_no_changes(self):
