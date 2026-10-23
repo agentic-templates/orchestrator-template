@@ -58,8 +58,8 @@ def git(*args: str, cwd: Path = ROOT) -> str:
 
 
 # An agent can plant a nested repository in its worktree whose config names programs, which git outside the sandbox
-# would run. These settings keep git from running any, except when it stages a nested repository, which
-# nested_repositories() leaves out.
+# would run. These settings keep git from running any, except when it stages a nested repository, so callers leave out
+# what nested_repositories() finds.
 SAFE_GIT = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=all")
 
 
@@ -224,7 +224,7 @@ def settings() -> str:
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
     # The project's own rules for .env files apply inside the agent's worktree, which has none. The maintainer's are
     # in the main checkout.
-    rules += [f"Read({rule_path(ROOT / name)})" for name in ENV_FILES]
+    rules += [f"Read({rule_path(ROOT)}/**/{name})" for name in ENV_FILES]
     permissions = project["permissions"] | {"deny": project["permissions"]["deny"] + rules}
     credentials = sandbox.setdefault("credentials", {})
     credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]

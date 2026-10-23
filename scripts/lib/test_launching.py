@@ -81,6 +81,7 @@ class SettingsTest(unittest.TestCase):
         accounts.write_text(json.dumps([{"name": "claude-2", "provider": "claude", "home": str(home / ".claude-2")}]))
         with mock.patch.object(Path, "home", lambda: home), mock.patch.object(launching.usage, "ACCOUNTS", accounts):
             settings = json.loads(launching.settings())
+            main_env = f"Read({launching.rule_path(launching.ROOT)}/**/.env)"
         denied = settings["permissions"]["deny"]
         expected = [
             "Read(~/.netrc)",
@@ -88,6 +89,7 @@ class SettingsTest(unittest.TestCase):
             "Read(~/.config/anthropic/**)",
             "Read(~/.claude-2/**)",
             "Read(~/.claude.json)",
+            main_env,
         ]
         for rule in expected:
             self.assertIn(rule, denied)
