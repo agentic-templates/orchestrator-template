@@ -115,8 +115,7 @@ class RunningAgentsTest(unittest.TestCase):
 
     def orphan(self, agent_code: str) -> subprocess.Popen:
         """An agent's process, named by its ID as a launched agent is, whose launcher has ended."""
-        # scripts/launch starts each agent's session as the leader of its own process group.
-        child = subprocess.Popen([sys.executable, "-c", agent_code, "builder-1-test"], start_new_session=True)
+        child = subprocess.Popen([sys.executable, "-c", agent_code, "builder-1-test"])
         self.addCleanup(child.wait)
         self.addCleanup(child.kill)
         launcher = subprocess.Popen(["true"])
@@ -148,26 +147,6 @@ class RunningAgentsTest(unittest.TestCase):
             usage.end_orphans()
         self.assertEqual(child.wait(timeout=5), -signal.SIGKILL)
 
-    def test_a_command_the_agent_started_is_ended_with_it(self):
-        marker = usage.AGENTS / "command-pid"
-        # The agent starts a command that ignores being told to stop, as a build or a test run can.
-        command = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)"
-        child = self.orphan(
-            "import subprocess, sys, time\n"
-            f"command = subprocess.Popen([sys.executable, '-c', {command!r}])\n"
-            f"open({str(marker)!r}, 'w').write(str(command.pid))\n"
-            "time.sleep(30)"
-        )
-        deadline = time.time() + 5
-        while not marker.exists() and time.time() < deadline:
-            time.sleep(0.05)
-        command_pid = int(marker.read_text())
-        with mock.patch.object(usage, "STOP_SECONDS", 1.0):
-            usage.end_orphans()
-        child.wait(timeout=5)
-        time.sleep(0.2)
-        self.assertFalse(usage.is_running(command_pid, "python3") or usage.started_at(command_pid))
-
     def test_a_launcher_that_exits_while_an_orphan_is_ended_is_left_alone(self):
         orphan = self.orphan("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)")
         time.sleep(0.2)
@@ -184,7 +163,7 @@ class RunningAgentsTest(unittest.TestCase):
     def test_an_agent_that_ends_just_before_it_is_told_to_stop_counts_as_stopped(self):
         self.orphan("import time; time.sleep(30)")
         # The signal finds no process, as when the agent ends between the check and the signal.
-        with mock.patch.object(usage.os, "killpg", side_effect=ProcessLookupError):
+        with mock.patch.object(usage.os, "kill", side_effect=ProcessLookupError):
             usage.end_orphans()
         self.assertEqual(usage.running_agents(), [])
         self.assertIn("stopped", json.loads((usage.AGENTS / "builder-1-test.json").read_text()))

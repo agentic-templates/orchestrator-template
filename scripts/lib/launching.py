@@ -272,7 +272,6 @@ def start(
         "--verbose", "--settings", settings(), "--name", agent_id,
         *(["--resume", session_id] if usage.transcript(account.name, session_id) else ["--session-id", session_id]),
     ]  # fmt: skip
-    # In a process group of its own, so that stopping the agent also stops the commands it started.
     process = subprocess.Popen(
         command,
         cwd=worktree,
@@ -280,7 +279,6 @@ def start(
         stdin=input_fd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
     )
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
     send(input_path, prompt)

@@ -303,22 +303,19 @@ def end_orphans() -> None:
 
 
 def end(pid: int, name: str) -> None:
-    """Stops an agent's session, which scripts/launch starts as the leader of its own process group, and the
-    commands it started, if the session's command line has `name`. Kills what hasn't stopped within STOP_SECONDS."""
+    """Stops the process if its command line has `name`, and kills it if it hasn't stopped within STOP_SECONDS."""
     if not is_running(pid, name):
         return
-    # The session can end between the check and the signal, such as when the watcher and scripts/status end the
+    # The process can end between the check and the signal, such as when the watcher and scripts/status end the
     # same agent at once.
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(pid, signal.SIGTERM)
+        os.kill(pid, signal.SIGTERM)
         deadline = time.time() + STOP_SECONDS
-        while time.time() < deadline and is_running(pid, name):
+        while time.time() < deadline:
+            if not is_running(pid, name):
+                return
             time.sleep(0.2)
-    # A command the session started can outlive it and keep writing to the worktree while its work is saved. The
-    # group's ID can't go to another process while any of its members runs. macOS refuses the signal when the only
-    # member left is the session itself, ended but not yet collected by its launcher.
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        os.killpg(pid, signal.SIGKILL)
+        os.kill(pid, signal.SIGKILL)
 
 
 def pid_in(path: Path) -> int | None:
