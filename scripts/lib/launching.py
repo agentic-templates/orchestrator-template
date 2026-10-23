@@ -25,6 +25,15 @@ WORKTREES = usage.LOOP / "worktrees"
 # Agents' own uv cache and tools. The scripts and hooks that run outside the sandbox use the default cache and Python, which
 # agents may only read, so that nothing an agent writes runs outside the sandbox.
 UV_CACHE = usage.LOOP / "agent-uv-cache"
+# Places in the home folder that commonly hold secrets, which agents mustn't read.
+SECRETS = (
+    ".netrc", ".npmrc", ".docker", ".kube", ".git-credentials", ".config/git/credentials", ".zsh_history",
+    ".zsh_sessions", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history",
+)  # fmt: skip
+# Where a project keeps its secrets, as AGENTS.md and the common frameworks name them.
+ENV_FILES = (".env", ".env.local", ".env.*.local")
+# The folders in ~/.config that agents' commands need. Agents read no other. Git stops when it can't read its own.
+CONFIG_NEEDED = ("gh", "git")
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
 
@@ -46,6 +55,43 @@ class Session:
 
 def git(*args: str, cwd: Path = ROOT) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+
+# An agent can plant a nested repository in its worktree whose config names programs, which git outside the sandbox
+# would run. These settings keep git from running any, except when it stages a nested repository, which
+# nested_repositories() leaves out.
+SAFE_GIT = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=all")
+
+
+def worktree_git(worktree: Path, *args: str) -> str:
+    """Git in an agent's worktree, which the agent controls, from outside the sandbox."""
+    return git(*SAFE_GIT, *args, cwd=worktree)
+
+
+def nested_repositories(worktree: Path) -> list[str]:
+    """The nested git repositories in the worktree: registered submodules, other repositories staged as gitlinks,
+    and untracked ones. Staging one runs the programs its config names, and the agent can write that config. Neither
+    listing reads a nested repository's config."""
+    staged = worktree_git(worktree, "ls-files", "--stage", "-z").split("\0")
+    gitlinks = [entry.split("\t", 1)[1] for entry in staged if entry.startswith("160000 ")]
+    # git lists an untracked nested repository as its folder, and every other untracked path as a file.
+    untracked = worktree_git(worktree, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
+    return gitlinks + [path.removesuffix("/") for path in untracked if path.endswith("/")]
+
+
+def changes(worktree: Path, nested: list[str]) -> str:
+    """The worktree's changes, as `git status --porcelain` lists them, without its nested repositories."""
+    return worktree_git(worktree, "status", "--porcelain", "--", *excluding(nested))
+
+
+def excluding(nested: list[str]) -> list[str]:
+    return [f":(exclude){path}" for path in nested]
+
+
+def left_out(nested: list[str]) -> str:
+    """What the orchestrator needs to know about the nested repositories a save leaves out."""
+    note = "is a nested git repository, so it wasn't saved, and it's deleted with the worktree."
+    return " ".join(f"{path} {note}" for path in nested)
 
 
 def choose_account(
@@ -120,10 +166,10 @@ def add_branch_worktree(path: Path, issue: int, continues: bool) -> None:
                 f"GitHub couldn't say whether {branch} merged, so the agent didn't start: {failure}. Launch it again "
                 "later."
             ) from None
-        if merged and git("status", "--porcelain", cwd=old):
+        if merged and changes(old, nested_repositories(old)):
             raise SystemExit(f"The agent didn't start. {merged_leftovers(branch, old)}")
         if merged:
-            git("worktree", "remove", "--force", str(old))
+            remove_worktree(old)
             continue
         collect_note(old, issue)
         if error := save_work(old):
@@ -131,7 +177,7 @@ def add_branch_worktree(path: Path, issue: int, continues: bool) -> None:
                 f"The agent didn't start, because the last builder's work on {branch} isn't on GitHub yet. "
                 + push_advice(error, old)
             )
-        git("worktree", "remove", "--force", str(old))
+        remove_worktree(old)
     # Fetched after saving, so that a successor starts from the work just pushed.
     git("fetch", "--quiet", "--prune", "origin")
     pushed = git("branch", "--remotes", "--list", f"origin/{branch}")
@@ -173,7 +219,34 @@ def settings() -> str:
     sandbox = project["sandbox"] | {"allowUnsandboxedCommands": False}
     filesystem = sandbox.setdefault("filesystem", {})
     filesystem["allowWrite"] = [*filesystem.get("allowWrite", []), str(UV_CACHE)]
-    return json.dumps({"permissions": project["permissions"], "sandbox": sandbox})
+    secrets = [rule_path(path) for path in secret_paths()]
+    # A path that may be a file or a folder is denied both ways.
+    rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
+    # The project's own rules for .env files apply inside the agent's worktree, which has none. The maintainer's are
+    # in the main checkout.
+    rules += [f"Read({rule_path(ROOT / name)})" for name in ENV_FILES]
+    permissions = project["permissions"] | {"deny": project["permissions"]["deny"] + rules}
+    credentials = sandbox.setdefault("credentials", {})
+    credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]
+    return json.dumps({"permissions": permissions, "sandbox": sandbox})
+
+
+def secret_paths() -> list[Path]:
+    """What agents mustn't read: the places that commonly hold secrets, each folder in ~/.config but those their
+    commands need, and every account's own folder. Claude Code reads its account's folder outside the sandbox, so
+    an agent's commands never need one."""
+    home = Path.home()
+    config = home / ".config"
+    configs = [path for path in config.iterdir() if path.name not in CONFIG_NEEDED] if config.is_dir() else []
+    accounts = [home / ".claude", home / ".claude.json", home / ".codex"]
+    accounts += [Path(os.path.expanduser(account.home)) for account in usage.accounts() if account.home]
+    return sorted({*(home / path for path in SECRETS), *configs, *accounts})
+
+
+def rule_path(path: Path) -> str:
+    """The path as Claude Code's permission rules write it: from the home folder, or absolute with two slashes."""
+    home = Path.home()
+    return f"~/{path.relative_to(home)}" if path.is_relative_to(home) else f"/{path}"
 
 
 def start(
@@ -199,8 +272,15 @@ def start(
         "--verbose", "--settings", settings(), "--name", agent_id,
         *(["--resume", session_id] if usage.transcript(account.name, session_id) else ["--session-id", session_id]),
     ]  # fmt: skip
+    # In a process group of its own, so that stopping the agent also stops the commands it started.
     process = subprocess.Popen(
-        command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        command,
+        cwd=worktree,
+        env=environment,
+        stdin=input_fd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
     send(input_path, prompt)
@@ -308,7 +388,7 @@ def successor_message(number: int, note: Path | None, commits: str) -> str:
 
 
 def branch_commits(worktree: Path) -> str:
-    return git("log", "--oneline", "origin/main..HEAD", cwd=worktree)
+    return worktree_git(worktree, "log", "--oneline", "origin/main..HEAD")
 
 
 def collect_note(worktree: Path, number: int) -> None:
@@ -346,9 +426,16 @@ def plain_file_text(folder: int, name: str) -> str | None:
 
 
 def saved_work(worktree: Path) -> str:
-    """What the orchestrator needs to know about a stopped builder's work, once it's saved."""
-    branch = git("branch", "--show-current", cwd=worktree)
-    changed = git("status", "--porcelain", cwd=worktree)
+    """What the orchestrator needs to know about a stopped builder's work, once it's saved, and about what the save
+    left out."""
+    nested = nested_repositories(worktree)
+    return " ".join(filter(None, [save_branch(worktree, nested), left_out(nested)]))
+
+
+def save_branch(worktree: Path, nested: list[str]) -> str:
+    """Saves a stopped builder's work on its branch, unless the branch merged, and says what happened."""
+    branch = worktree_git(worktree, "branch", "--show-current")
+    changed = changes(worktree, nested)
     if not branch or not (changed or unpushed(worktree)):
         return ""
     try:
@@ -375,7 +462,7 @@ def is_merged(worktree: Path, branch: str) -> bool:
     merged = github.gh_json("pr", "list", "--head", branch, "--state", "merged", "--json", "commits,headRefOid") or []
     # gh lists only a pull request's first 100 commits, so the head commit is added too.
     commits = {commit["oid"] for pr in merged for commit in pr["commits"]} | {pr["headRefOid"] for pr in merged}
-    return git("rev-parse", "HEAD", cwd=worktree) in commits
+    return worktree_git(worktree, "rev-parse", "HEAD") in commits
 
 
 def merged_leftovers(branch: str, worktree: Path) -> str:
@@ -408,16 +495,17 @@ def push_advice(error: str, worktree: Path) -> str:
 def save_work(worktree: Path) -> str:
     """Commits what a builder left uncommitted on its branch, and pushes every commit GitHub doesn't have yet, so
     that a successor or a person can carry on. Returns git's error if the push fails, otherwise nothing."""
-    branch = git("branch", "--show-current", cwd=worktree)
+    branch = worktree_git(worktree, "branch", "--show-current")
     if not branch:
         return ""
-    if git("status", "--porcelain", cwd=worktree):
-        git("add", "--all", cwd=worktree)
-        git("commit", "--quiet", "--no-verify", "-m", "chore: save unfinished work", cwd=worktree)
+    nested = nested_repositories(worktree)
+    if changes(worktree, nested):
+        worktree_git(worktree, "add", "--all", "--", *excluding(nested))
+        worktree_git(worktree, "commit", "--quiet", "--no-verify", "-m", "chore: save unfinished work")
     if not unpushed(worktree):
         return ""
     try:
-        git("push", "--quiet", "--set-upstream", "origin", branch, cwd=worktree)
+        worktree_git(worktree, "push", "--quiet", "--set-upstream", "origin", branch)
     except subprocess.CalledProcessError as error:
         return push_error(error.stderr)
     return ""
@@ -425,11 +513,11 @@ def save_work(worktree: Path) -> str:
 
 def unpushed(worktree: Path) -> int:
     """How many of the worktree's commits are on no branch on GitHub."""
-    return int(git("rev-list", "--count", "HEAD", "--not", "--remotes=origin", cwd=worktree))
+    return int(worktree_git(worktree, "rev-list", "--count", "HEAD", "--not", "--remotes=origin"))
 
 
 def remove_worktree(worktree: Path) -> str:
-    """Removes the worktree of an agent that doesn't build, such as a reviewer. What it leaves there is scratch
-    work, because its result is a review or a comment."""
-    git("worktree", "remove", "--force", str(worktree))
+    """Removes the worktree with what's left in it: a reviewer's scratch work, because its result is a review or a
+    comment, or what a save leaves out, such as nested repositories."""
+    git(*SAFE_GIT, "worktree", "remove", "--force", str(worktree))
     return ""

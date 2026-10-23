@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -69,6 +70,89 @@ class SettingsTest(unittest.TestCase):
 
     def test_an_agent_cant_run_a_command_outside_the_sandbox(self):
         self.assertIs(json.loads(launching.settings())["sandbox"]["allowUnsandboxedCommands"], False)
+
+    def test_an_agent_cant_read_secrets_or_account_folders_but_can_read_what_gh_and_git_need(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        home = Path(folder.name)
+        for name in ("gh", "git", "anthropic"):
+            (home / ".config" / name).mkdir(parents=True)
+        accounts = home / "accounts.json"
+        accounts.write_text(json.dumps([{"name": "claude-2", "provider": "claude", "home": str(home / ".claude-2")}]))
+        with mock.patch.object(Path, "home", lambda: home), mock.patch.object(launching.usage, "ACCOUNTS", accounts):
+            settings = json.loads(launching.settings())
+        denied = settings["permissions"]["deny"]
+        expected = [
+            "Read(~/.netrc)",
+            "Read(~/.config/git/credentials)",
+            "Read(~/.config/anthropic/**)",
+            "Read(~/.claude-2/**)",
+            "Read(~/.claude.json)",
+        ]
+        for rule in expected:
+            self.assertIn(rule, denied)
+        self.assertFalse([rule for rule in denied if "/.config/gh" in rule or rule.startswith("Read(~/.config/git/**")])
+        self.assertIn({"path": "~/.claude-2", "mode": "deny"}, settings["sandbox"]["credentials"]["files"])
+
+
+def run_git(cwd: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
+class NestedRepositoryTest(unittest.TestCase):
+    """A builder's worktree, in which the agent planted a nested repository whose config runs a program that leaves a
+    marker, as an agent can from inside the sandbox."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        root = Path(folder.name)
+        run_git(root, "init", "--quiet", "--bare", "origin.git")
+        run_git(root, "clone", "--quiet", str(root / "origin.git"), "main")
+        for key, value in (("user.name", "Test"), ("user.email", "test@example.com"), ("commit.gpgsign", "false")):
+            run_git(root / "main", "config", key, value)
+        run_git(root / "main", "commit", "--quiet", "--allow-empty", "-m", "start")
+        run_git(root / "main", "push", "--quiet", "origin", "HEAD:main")
+        self.worktree = root / "worktree"
+        run_git(root / "main", "worktree", "add", "--quiet", "-b", "issue-1", str(self.worktree))
+        self.marker = root / "marker"
+        self.nested = self.worktree / "vendor" / "repo"
+        self.nested.mkdir(parents=True)
+        run_git(root, "init", "--quiet", "--separate-git-dir", str(root / "planted"), str(self.nested))
+        run_git(self.nested, "config", "filter.evil.clean", f"touch {self.marker}; cat")
+        (self.nested / ".gitattributes").write_text("* filter=evil\n")
+        (self.nested / "file").write_text("planted\n")
+        (self.worktree / "new.py").write_text("print('work')\n")
+
+    def committed(self) -> list[str]:
+        return run_git(self.worktree, "ls-tree", "-r", "--name-only", "origin/issue-1").split()
+
+    def test_an_untracked_nested_repository_is_left_out_and_the_rest_saved(self):
+        self.assertEqual(launching.save_work(self.worktree), "")
+        self.assertEqual(self.committed(), ["new.py"])
+        self.assertFalse(self.marker.exists())
+
+    def test_a_nested_repository_the_agent_staged_runs_nothing_when_the_work_is_saved(self):
+        for key, value in (("user.name", "Test"), ("user.email", "test@example.com"), ("commit.gpgsign", "false")):
+            run_git(self.nested, "config", key, value)
+        run_git(self.nested, "add", "--all")
+        run_git(self.nested, "commit", "--quiet", "-m", "start")
+        run_git(self.worktree, "add", "-f", "vendor/repo")
+        run_git(self.worktree, "commit", "--quiet", "-m", "add the repository")
+        self.marker.unlink(missing_ok=True)
+        (self.nested / "file").write_text("changed\n")
+        self.assertEqual(launching.save_work(self.worktree), "")
+        self.assertIn("new.py", self.committed())
+        self.assertFalse(self.marker.exists())
+
+    def test_a_worktree_with_only_a_nested_repository_has_no_changes(self):
+        (self.worktree / "new.py").unlink()
+        self.assertEqual(launching.changes(self.worktree, launching.nested_repositories(self.worktree)), "")
+
+    def test_the_report_names_what_was_left_out(self):
+        with mock.patch.object(launching.github, "gh_json", return_value=[]):
+            report = launching.saved_work(self.worktree)
+        self.assertIn("vendor/repo is a nested git repository, so it wasn't saved", report)
 
 
 class HoldingTest(unittest.TestCase):

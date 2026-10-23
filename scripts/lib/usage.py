@@ -303,19 +303,22 @@ def end_orphans() -> None:
 
 
 def end(pid: int, name: str) -> None:
-    """Stops the process if its command line has `name`, and kills it if it hasn't stopped within STOP_SECONDS."""
+    """Stops an agent's session, which scripts/launch starts as the leader of its own process group, and the
+    commands it started, if the session's command line has `name`. Kills what hasn't stopped within STOP_SECONDS."""
     if not is_running(pid, name):
         return
-    # The process can end between the check and the signal, such as when the watcher and scripts/status end the
+    # The session can end between the check and the signal, such as when the watcher and scripts/status end the
     # same agent at once.
     with contextlib.suppress(ProcessLookupError):
-        os.kill(pid, signal.SIGTERM)
+        os.killpg(pid, signal.SIGTERM)
         deadline = time.time() + STOP_SECONDS
-        while time.time() < deadline:
-            if not is_running(pid, name):
-                return
+        while time.time() < deadline and is_running(pid, name):
             time.sleep(0.2)
-        os.kill(pid, signal.SIGKILL)
+    # A command the session started can outlive it and keep writing to the worktree while its work is saved. The
+    # group's ID can't go to another process while any of its members runs. macOS refuses the signal when the only
+    # member left is the session itself, ended but not yet collected by its launcher.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(pid, signal.SIGKILL)
 
 
 def pid_in(path: Path) -> int | None:
@@ -418,14 +421,20 @@ def orchestrator_account() -> str | None:
     return orchestrator().get("account")
 
 
-def agent_fields(agent_type: str) -> dict[str, str]:
-    """The fields at the top of an agent type's definition in .claude/agents/, such as its model."""
+def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
+    """The fields at the top of an agent type's definition in .claude/agents/, such as its model. A list written as
+    lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
     path = ROOT / ".claude" / "agents" / f"{agent_type}.md"
-    fields = {}
+    fields: dict[str, str | list[str]] = {}
+    key = ""
     if path.exists():
         for line in path.read_text().split("---")[1].splitlines():
+            if line.strip().startswith("-") and key:
+                fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
+                continue
             key, _, value = line.partition(":")
-            fields[key.strip()] = value.strip()
+            key = key.strip()
+            fields[key] = value.strip()
     return fields
 
 
@@ -437,6 +446,7 @@ def agent_config(agent_type: str) -> str:
 
 def agent_skills(agent_type: str) -> list[str]:
     """The skills that an agent type preloads, from its definition."""
-    return [
-        skill.strip() for skill in agent_fields(agent_type).get("skills", "").strip("[]").split(",") if skill.strip()
-    ]
+    skills = agent_fields(agent_type).get("skills", "")
+    if isinstance(skills, str):
+        skills = skills.strip("[]").split(",")
+    return [skill.strip() for skill in skills if skill.strip()]

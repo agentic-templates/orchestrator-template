@@ -63,7 +63,8 @@ def tend_worktree(tree: dict, running: dict, save: bool) -> str:
             launching.remove_worktree(path)
             return ""
         return f"- {path.name}: its folder is gone"
-    changed = git("status", "--porcelain", cwd=path).splitlines()
+    nested = launching.nested_repositories(path)
+    changed = launching.changes(path, nested).splitlines()
     if not branch:
         # A builder that stopped in the middle of a rebase has no branch either, and its work must stay.
         if save and not is_builders(path):
@@ -81,13 +82,14 @@ def tend_worktree(tree: dict, running: dict, save: bool) -> str:
         if changed:
             return f"- {launching.merged_leftovers(branch, path)}"
         if save:
-            git("worktree", "remove", path.as_posix())
+            launching.remove_worktree(path)
             return ""
         return f"- {branch}: merged, no agent"
     if save and (changed or launching.unpushed(path)):
         if error := launching.save_work(path):
             return f"- {branch}: its builder stopped, and its work isn't on GitHub yet. {launching.push_advice(error, path)}"
-        return f"- {branch}: its builder stopped, and its work is pushed. Continue it with --successor."
+        pushed = f"- {branch}: its builder stopped, and its work is pushed. Continue it with --successor."
+        return " ".join(filter(None, [pushed, launching.left_out(nested)]))
     if changed:
         return f"- {branch}: {changed_files(changed)}, no agent"
     if commits := launching.unpushed(path):

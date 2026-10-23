@@ -19,8 +19,9 @@
       "Bash(uvx *)"
     ],
     "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.*.local)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
       "Bash(sudo *)",
