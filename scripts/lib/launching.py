@@ -233,7 +233,7 @@ def settings() -> str:
 def in_main_checkout(rule: str) -> str | None:
     """The project's rule against reading some of its own files, for the same files in the main checkout. Other
     rules, and rules for paths from the home folder or absolute ones, give None."""
-    if not rule.startswith("Read(") or rule.startswith(("Read(~", "Read(//")):
+    if not rule.startswith("Read(") or rule.startswith(("Read(~/", "Read(//")):
         return None
     pattern = rule.removeprefix("Read(").removeprefix("./")
     # Claude Code matches a pattern without a leading slash from the working directory, and some, such as .env and
