@@ -21,7 +21,8 @@ def record_orchestrator(account: str, status: dict) -> None:
     window = (status.get("context_window") or {}).get("context_window_size")
     update = {"transcript": status.get("transcript_path"), "window": window}
     if any(orchestrator.get(key) != value for key, value in update.items() if value):
-        usage.ORCHESTRATOR.write_text(json.dumps({**orchestrator, **{k: v for k, v in update.items() if v}}))
+        updated = {**orchestrator, **{key: value for key, value in update.items() if value}}
+        usage.write_atomically(usage.ORCHESTRATOR, json.dumps(updated))
 
 
 def main() -> None:

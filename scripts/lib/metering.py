@@ -1,6 +1,5 @@
 """The meter's decisions for every account, from their readings and the agents that run on them."""
 
-import json
 import math
 import shutil
 import time
@@ -72,10 +71,7 @@ def clear_old_notices(running: list[dict]) -> None:
 
 def recent_agents(since: float) -> list[dict]:
     """The agents that ran after `since`, stopped or not."""
-    if not usage.AGENTS.exists():
-        return []
-    agents = [json.loads(path.read_text()) for path in usage.AGENTS.glob("*.json")]
-    return [agent for agent in agents if agent.get("stopped", since) >= since]
+    return [agent for agent in usage.agent_records() if agent.get("stopped", since) >= since]
 
 
 def decisions() -> dict[str, meter.Decision]:

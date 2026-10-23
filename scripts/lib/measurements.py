@@ -26,10 +26,10 @@ def recent(key: str) -> list[float]:
     if not PATH.exists():
         return []
     cutoff = time.time() - MAX_AGE_SECONDS
-    lines = [json.loads(line) for line in PATH.read_text().splitlines() if line]
+    lines = usage.json_lines(PATH.read_text().splitlines())
     kept = [line for line in lines if line["time"] >= cutoff]
     if len(kept) < len(lines):
-        PATH.write_text("".join(json.dumps(line) + "\n" for line in kept))
+        usage.write_atomically(PATH, "".join(json.dumps(line) + "\n" for line in kept))
     return [line["value"] for line in kept if line["key"] == key][-MAX_COUNT:]
 
 

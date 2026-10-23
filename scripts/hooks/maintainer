@@ -22,7 +22,7 @@ def main() -> None:
     prompt = json.load(sys.stdin).get("prompt", "")
     if not prompt.lstrip().startswith("<") and not usage.orchestrator_elsewhere():
         usage.LOOP.mkdir(exist_ok=True)
-        usage.MAINTAINER.write_text(json.dumps({"last_message": time.time()}))
+        usage.write_atomically(usage.MAINTAINER, json.dumps({"last_message": time.time()}))
 
 
 if __name__ == "__main__":

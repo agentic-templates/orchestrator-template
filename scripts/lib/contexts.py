@@ -8,6 +8,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import usage
+
 # Tokens a turn adds, until a session has had enough turns to show its own. An earlier project, zzz, measured it.
 DEFAULT_GROWTH = 4_200
 TURNS_BEFORE_OWN_GROWTH = 5
@@ -21,6 +23,8 @@ class Context:
     current: int = 0
     model: str | None = None
     last_message: str | None = None
+    # Whether the watcher has told the orchestrator that this session is near its limit, which it does once.
+    reported_limit: bool = False
 
     def growth(self) -> int:
         if self.start is None or self.turns < TURNS_BEFORE_OWN_GROWTH:
@@ -75,4 +79,4 @@ def load(path: Path) -> dict[str, Context]:
 
 
 def save(path: Path, contexts: dict[str, Context]) -> None:
-    path.write_text(json.dumps({key: asdict(value) for key, value in contexts.items()}))
+    usage.write_atomically(path, json.dumps({key: asdict(value) for key, value in contexts.items()}))

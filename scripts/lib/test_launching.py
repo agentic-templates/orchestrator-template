@@ -156,7 +156,7 @@ class HandleTest(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.note = Path(folder.name) / "issue-7.md"
         self.note.write_text("Left: the tests.")
-        self.session = launching.Session("builder-7-abc", "id", "claude", Path(folder.name), None, Path(), Path())
+        self.session = launching.Session("builder-7-abc", "id", "claude", Path(folder.name), None, Path())
         self.session.note = self.note
 
     def test_the_note_is_kept_until_the_agent_answers(self):
@@ -169,6 +169,12 @@ class HandleTest(unittest.TestCase):
         launching.handle(self.session, b'{"type": "assistant", "error": "rate_limit"}')
         launching.handle(self.session, b'{"type": "assistant", "message": {"model": "<synthetic>"}}')
         self.assertTrue(self.note.exists())
+
+    def test_a_result_saves_each_models_context_window(self):
+        with mock.patch.object(launching.usage, "CONTEXT_WINDOWS", self.note.parent / "context-windows.json"):
+            result = {"type": "result", "result": "Done.", "modelUsage": {"claude-x": {"contextWindow": 200_000}}}
+            launching.handle(self.session, json.dumps(result).encode())
+            self.assertEqual(launching.usage.context_window("claude", "claude-x"), 200_000)
 
     def test_a_note_written_later_is_kept(self):
         launching.handle(self.session, b'{"type": "assistant"}')

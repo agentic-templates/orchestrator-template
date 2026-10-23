@@ -4,6 +4,7 @@ import contextlib
 import json
 import os
 import select
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -41,6 +42,8 @@ NOTE = Path(".loop") / "handoff.md"
 ORCHESTRATOR_ID = "orchestrator"
 ORCHESTRATOR = LOOP / "orchestrator.json"
 MAINTAINER = LOOP / "maintainer.json"
+# The context window of each model on each account, as Claude Code reported it at the end of an agent's turn.
+CONTEXT_WINDOWS = LOOP / "context-windows.json"
 # Readings older than this tell nothing about the current burn, so the file keeps only these.
 KEEP_SECONDS = 8 * 3600
 
@@ -101,6 +104,26 @@ def environment_for(account: Account) -> dict[str, str]:
     return environment
 
 
+def write_atomically(path: Path, text: str) -> None:
+    """Replaces the file in one step, because other processes read it while this one writes, and a half-written
+    file would crash them."""
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=f".{path.name}.", delete=False) as file:
+        file.write(text)
+    os.replace(file.name, path)
+
+
+def json_lines(lines: list[str] | list[bytes]) -> list[dict]:
+    """The lines that hold JSON objects, without one that another process is still writing, or one cut where the
+    reading started."""
+    parsed = []
+    for line in lines:
+        with contextlib.suppress(json.JSONDecodeError, UnicodeDecodeError):
+            value = json.loads(line)
+            if isinstance(value, dict):
+                parsed.append(value)
+    return parsed
+
+
 def record(account: str, window: str, used: float, resets_at: float) -> None:
     """Saves one reading, unless it only repeats the last one within a minute."""
     USAGE.mkdir(parents=True, exist_ok=True)
@@ -117,10 +140,10 @@ def windows(account: str) -> dict[str, list[Reading]]:
     if not path.exists():
         return {}
     cutoff = time.time() - KEEP_SECONDS
-    lines = [json.loads(line) for line in path.read_text().splitlines() if line]
+    lines = json_lines(path.read_text().splitlines())
     kept = [line for line in lines if line["time"] >= cutoff]
     if len(kept) < len(lines):
-        path.write_text("".join(json.dumps(line) + "\n" for line in kept))
+        write_atomically(path, "".join(json.dumps(line) + "\n" for line in kept))
     result: dict[str, list[Reading]] = {}
     for line in kept:
         result.setdefault(line["window"], []).append(Reading(line["time"], line["used"], line["resets_at"]))
@@ -131,6 +154,22 @@ def record_claude_event(account: str, event: dict) -> None:
     """Saves the readings in a `rate_limit_event` from Claude Code's stream-json output."""
     for window, values in (event.get("rate_limit_info", event).get("unifiedWindows") or {}).items():
         record(account, window, values["utilization"] * 100, values["resetsAt"])
+
+
+def record_context_windows(account: str, model_usage: dict) -> None:
+    """Saves the context window of each model in a `result` event's `modelUsage`. The window can depend on the
+    account's plan as well as the model, so it's kept for each account."""
+    known = json.loads(CONTEXT_WINDOWS.read_text()) if CONTEXT_WINDOWS.exists() else {}
+    reported = {model: values["contextWindow"] for model, values in model_usage.items() if values.get("contextWindow")}
+    windows = known.get(account, {})
+    if reported and (windows | reported) != windows:
+        write_atomically(CONTEXT_WINDOWS, json.dumps(known | {account: windows | reported}))
+
+
+def context_window(account: str, model: str | None) -> int | None:
+    """The model's context window on the account, once an agent's turn on it there has ended."""
+    known = json.loads(CONTEXT_WINDOWS.read_text()) if CONTEXT_WINDOWS.exists() else {}
+    return known.get(account, {}).get(model)
 
 
 def record_status_line(account: str, status: dict) -> None:
@@ -223,8 +262,7 @@ def running_agents() -> list[dict]:
     if not AGENTS.exists():
         return []
     running = []
-    for path in AGENTS.glob("*.json"):
-        agent = json.loads(path.read_text())
+    for agent in agent_records():
         if "stopped" in agent:
             continue
         if is_running(agent["pid"], "launch") or is_orphan(agent):
@@ -232,6 +270,19 @@ def running_agents() -> list[dict]:
         else:
             save_agent({**agent, "stopped": time.time()})
     return sorted(running, key=lambda agent: agent["started"])
+
+
+def agent_records() -> list[dict]:
+    """The record of every agent that scripts/launch started."""
+    return [record for path in AGENTS.glob("*.json") if (record := agent_record(path.stem))]
+
+
+def agent_record(agent_id: str) -> dict | None:
+    # A launch that fails deletes its record, which can happen while another script lists or reads it.
+    try:
+        return json.loads((AGENTS / f"{agent_id}.json").read_text())
+    except FileNotFoundError:
+        return None
 
 
 def is_orphan(agent: dict) -> bool:
@@ -267,6 +318,15 @@ def end(pid: int, name: str) -> None:
         os.kill(pid, signal.SIGKILL)
 
 
+def pid_in(path: Path) -> int | None:
+    """The process ID that a script saved in the file, if the file is there. The script deletes it when it ends,
+    which can happen while another script reads it."""
+    try:
+        return int(path.read_text())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
 def is_running(pid: int, name: str) -> bool:
     """Whether the process's command line has `name` as a word, such as the program "watch" whatever path started
     it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
@@ -276,7 +336,7 @@ def is_running(pid: int, name: str) -> bool:
 
 def save_agent(agent: dict) -> None:
     AGENTS.mkdir(parents=True, exist_ok=True)
-    (AGENTS / f"{agent['id']}.json").write_text(json.dumps(agent))
+    write_atomically(AGENTS / f"{agent['id']}.json", json.dumps(agent))
 
 
 def notify(agent_id: str, kind: str, message: str) -> None:
@@ -285,7 +345,12 @@ def notify(agent_id: str, kind: str, message: str) -> None:
     folder = NOTICES / agent_id
     folder.mkdir(parents=True, exist_ok=True)
     if not (folder / f"{kind}.told").exists():
-        (folder / kind).write_text(message)
+        write_atomically(folder / kind, message)
+
+
+def forget_notices(agent_id: str) -> None:
+    """Drops the agent's notices, and which ones it was told, so that a new session gets each kind again."""
+    shutil.rmtree(NOTICES / agent_id, ignore_errors=True)
 
 
 def untold_notices(agent_id: str) -> list[str]:
@@ -294,11 +359,23 @@ def untold_notices(agent_id: str) -> list[str]:
     if not folder.is_dir():
         return []
     messages = []
-    for notice in sorted(path for path in folder.iterdir() if path.suffix != ".told"):
+    # A name that starts with a dot is a notice still being written.
+    for notice in sorted(path for path in folder.iterdir() if path.suffix != ".told" and not path.name.startswith(".")):
         if not notice.with_suffix(".told").exists():
             messages.append(notice.read_text())
             notice.with_suffix(".told").touch()
     return messages
+
+
+def transcript(account_name: str, session_id: str) -> Path | None:
+    """Where the account's Claude Code keeps the session's transcript, if it has one yet. Claude Code names the
+    folder after the session's working directory, replacing some characters and shortening long names, so the
+    folder is found rather than built."""
+    account = next((a for a in accounts() if a.name == account_name), None)
+    if account is None:
+        return None
+    home = Path(os.path.expanduser(account.home)) if account.home else Path.home() / ".claude"
+    return next(home.glob(f"projects/*/{session_id}.jsonl"), None)
 
 
 def orchestrator() -> dict:

@@ -111,7 +111,6 @@ def main() -> int:
         "started": time.time(),
         "pid": os.getpid(),
         "worktree": str(worktree),
-        "transcript": str(launching.transcript_path(account, worktree, session_id)),
         "builds": launching.builds(arguments.agent_type),
     }
     # Saved before the agent starts, so that the meter counts it for a launch that comes right after this one.
