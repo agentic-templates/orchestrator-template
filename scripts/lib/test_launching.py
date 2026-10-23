@@ -103,6 +103,7 @@ class SettingsTest(unittest.TestCase):
             "Read(**/.env)",
             "Read(./.env.*)",
             "Read(/secrets/**)",
+            "Read(keys/**)",
             "Read(key.pem)",
             "Read(~/.ssh/**)",
             "Bash(rm *)",
@@ -111,7 +112,7 @@ class SettingsTest(unittest.TestCase):
         with mock.patch.object(launching, "ROOT", main):
             denied = json.loads(launching.settings())["permissions"]["deny"]
         in_main = [rule for rule in denied if rule.startswith(f"Read(/{main}/")]
-        expected = [f"Read(/{main}/{path})" for path in ("**/.env", ".env.*", "secrets/**", "**/key.pem")]
+        expected = [f"Read(/{main}/{path})" for path in ("**/.env", "**/.env.*", "secrets/**", "**/keys/**", "**/key.pem")]
         self.assertEqual(in_main, expected)
 
 

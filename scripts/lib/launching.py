@@ -235,12 +235,12 @@ def in_main_checkout(rule: str) -> str | None:
     rules, and rules for paths from the home folder or absolute ones, give None."""
     if not rule.startswith("Read(") or rule.startswith(("Read(~", "Read(//")):
         return None
-    pattern = rule.removeprefix("Read(")
-    # In .gitignore, which the rules follow, a pattern without a slash matches in every folder. Denying it in every
-    # folder is safe even where Claude Code differs.
-    if "/" not in pattern:
+    pattern = rule.removeprefix("Read(").removeprefix("./")
+    # Claude Code matches a pattern without a leading slash from the working directory, and some, such as .env and
+    # secrets/**, in every folder below it. Denying each in every folder of the main checkout is safe.
+    if not pattern.startswith(("/", "**/")):
         pattern = f"**/{pattern}"
-    return f"Read({rule_path(ROOT)}/{pattern.removeprefix('./').removeprefix('/')}"
+    return f"Read({rule_path(ROOT)}/{pattern.removeprefix('/')}"
 
 
 def secret_paths() -> list[Path]:
