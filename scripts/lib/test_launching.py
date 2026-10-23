@@ -191,7 +191,7 @@ class NestedRepositoryTest(unittest.TestCase):
     def test_the_report_names_what_was_left_out(self):
         with mock.patch.object(launching.github, "gh_json", return_value=[]):
             report = launching.saved_work(self.worktree)
-        self.assertIn("vendor/repo is a nested git repository, so it wasn't saved", report)
+        self.assertIn("vendor/repo is a nested git repository, so the loop didn't save it.", report)
 
 
 class HoldingTest(unittest.TestCase):

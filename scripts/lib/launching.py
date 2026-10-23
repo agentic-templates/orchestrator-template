@@ -88,7 +88,7 @@ def excluding(nested: list[str]) -> list[str]:
 
 def left_out(nested: list[str]) -> str:
     """What the orchestrator needs to know about the nested repositories a save leaves out."""
-    note = "is a nested git repository, so it wasn't saved, and it's deleted with the worktree."
+    note = "is a nested git repository, so the loop didn't save it. The loop deletes it when it removes the worktree."
     return " ".join(f"{path} {note}" for path in nested)
 
 
