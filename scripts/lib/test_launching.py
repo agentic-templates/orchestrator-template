@@ -64,6 +64,12 @@ class ChooseAccountTest(unittest.TestCase):
 
 
 class SettingsTest(unittest.TestCase):
+    def setUp(self):
+        # The maintainer's own file mustn't change what these tests see.
+        patch = mock.patch.object(launching, "AGENTS_ENV", Path("/nonexistent/agents.env"))
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_the_sandbox_lets_an_agent_write_only_its_own_uv_cache(self):
         writable = json.loads(launching.settings())["sandbox"]["filesystem"]["allowWrite"]
         self.assertEqual(writable, [str(launching.UV_CACHE)])
@@ -95,7 +101,7 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse([rule for rule in denied if "/.config/gh" in rule or rule.startswith("Read(~/.config/git/**")])
         self.assertIn({"path": "~/.claude-2", "mode": "deny"}, settings["sandbox"]["credentials"]["files"])
 
-    def test_an_agent_cant_read_the_files_the_project_denies_in_the_main_checkout(self):
+    def test_an_agent_cant_read_or_edit_the_files_the_project_denies_in_the_main_checkout(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         main = Path(folder.name)
@@ -108,17 +114,135 @@ class SettingsTest(unittest.TestCase):
             "Read(key.pem)",
             "Read(~secrets)",
             "Read(~/.ssh/**)",
+            "Edit(/.loop/agents.env)",
             "Bash(rm *)",
         ]
         (main / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"deny": deny}, "sandbox": {}}))
         with mock.patch.object(launching, "ROOT", main):
             denied = json.loads(launching.settings())["permissions"]["deny"]
-        in_main = [rule for rule in denied if rule.startswith(f"Read(/{main}/")]
+        in_main = [rule for rule in denied if rule.startswith((f"Read(/{main}/", f"Edit(/{main}/"))]
         expected = [
             f"Read(/{main}/{path})"
             for path in ("**/.env", "**/.env.*", "secrets/**", "**/keys/**", "**/key.pem", "**/~secrets")
         ]
-        self.assertEqual(in_main, expected)
+        self.assertEqual(in_main, [*expected, f"Edit(/{main}/.loop/agents.env)"])
+
+
+class AgentVariablesTest(unittest.TestCase):
+    def test_lines_give_variables_and_the_hosts_they_name(self):
+        text = (
+            "# Keys for the summarizer\n"
+            "\n"
+            "DEEPSEEK_API_KEY=sk-1 # host: api.deepseek.com\n"
+            "export MODE=fast # for the tests\n"
+            'GREETING="hello # there" # host: greetings.example.com\n'
+            "HASHED=a#b\n"
+            "SPACED = two words\n"
+            "EMPTY=\n"
+            "UPLOAD_KEY='k-2'\t# host: *.uploads.example.com:8443\n"
+        )
+        variables, hosts = launching.parse_agent_variables(text)
+        expected = {
+            "DEEPSEEK_API_KEY": "sk-1",
+            "MODE": "fast",
+            "GREETING": "hello # there",
+            "HASHED": "a#b",
+            "SPACED": "two words",
+            "EMPTY": "",
+            "UPLOAD_KEY": "k-2",
+        }
+        self.assertEqual(variables, expected)
+        self.assertEqual(hosts, ["api.deepseek.com", "greetings.example.com", "*.uploads.example.com:8443"])
+
+    def test_a_line_it_cant_read_is_refused_by_its_number_without_its_value(self):
+        for line in (
+            "sk-secret",
+            "KEY sk-secret",
+            'KEY="sk-secret',
+            'KEY="sk-secret\\nline"',
+            "KEY=sk-secret # host:",
+            "KEY=sk-secret # host: *",
+            "KEY=sk-secret # host: https://api.example.com",
+        ):
+            with self.subTest(line), self.assertRaises(ValueError) as refusal:
+                launching.parse_agent_variables(f"MODE=fast\n{line}\n")
+            self.assertIn("line 2 ", str(refusal.exception).lower())
+            self.assertNotIn("sk-secret", str(refusal.exception))
+
+    def test_launches_are_refused_while_the_file_has_a_line_it_cant_read(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "agents.env"
+        with mock.patch.object(launching, "AGENTS_ENV", path):
+            self.assertEqual(launching.agent_variables_refusal(), "")
+            path.write_text("KEY=sk-secret # host: https://api.example.com\n")
+            self.assertIn("No agent can start", launching.agent_variables_refusal())
+
+
+class WithoutSecretsTest(unittest.TestCase):
+    def test_names_with_a_secret_word_are_left_out(self):
+        environment = {
+            name: "x"
+            for name in (
+                "GH_TOKEN", "OPENAI_API_KEY", "KEY", "aws_secret_access_key", "DB_PASSWORD",
+                "GOOGLE_APPLICATION_CREDENTIALS", "PATH", "SSH_AUTH_SOCK", "KEYBOARD_LAYOUT", "TOKENIZERS_PARALLELISM",
+            )
+        }  # fmt: skip
+        kept, left_out = launching.without_secrets(environment)
+        self.assertEqual(sorted(kept), ["KEYBOARD_LAYOUT", "PATH", "SSH_AUTH_SOCK", "TOKENIZERS_PARALLELISM"])
+        expected = [
+            "DB_PASSWORD", "GH_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS", "KEY", "OPENAI_API_KEY", "aws_secret_access_key",
+        ]  # fmt: skip
+        self.assertEqual(left_out, expected)
+
+
+class StartTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        agents_env = self.folder / "agents.env"
+        agents_env.write_text("DEEPSEEK_API_KEY=from-file # host: api.deepseek.com\n")
+        inherited = {"PATH": os.environ["PATH"], "OPENAI_API_KEY": "x", "DEEPSEEK_API_KEY": "x", "GH_TOKEN": "x"}
+        # Stands in for Claude Code, which the test mustn't start.
+        self.popen = mock.MagicMock()
+        for patch in (
+            mock.patch.dict(os.environ, inherited, clear=True),
+            mock.patch.object(launching, "AGENTS_ENV", agents_env),
+            mock.patch.object(launching.usage, "AGENTS", self.folder / "agents"),
+            mock.patch.object(launching, "github_login", lambda: {"GH_TOKEN": "the-loops"}),
+            mock.patch.object(launching.subprocess, "Popen", self.popen),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def start(self, resumes: bool) -> tuple[dict[str, str], str, list[str]]:
+        """The agent's environment, its first message and its command."""
+        with mock.patch.object(launching.usage, "transcript", lambda account, session: resumes):
+            launching.start(ACCOUNTS[0], "builder", "builder-1-test", self.folder, "Build issue #1.", "session")
+        reader = os.open(self.folder / "agents" / "builder-1-test.input", os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+        message = json.loads(os.read(reader, 65536))["message"]["content"]
+        command = self.popen.call_args.args[0]
+        return self.popen.call_args.kwargs["env"], message, command
+
+    def test_an_agent_gets_the_files_variables_but_not_inherited_secrets(self):
+        environment, message, command = self.start(resumes=False)
+        self.assertNotIn("OPENAI_API_KEY", environment)
+        self.assertEqual(environment["DEEPSEEK_API_KEY"], "from-file")
+        self.assertEqual(environment["GH_TOKEN"], "the-loops")
+        self.assertTrue(message.startswith("Build issue #1.\n\n"))
+        self.assertIn("leaves out OPENAI_API_KEY.", message)
+        self.assertNotIn("DEEPSEEK_API_KEY", message)
+        self.assertNotIn("GH_TOKEN", message)
+        allowed = json.loads(command[command.index("--settings") + 1])["sandbox"]["network"]["allowedDomains"]
+        self.assertIn("api.deepseek.com", allowed)
+        self.assertIn("github.com", allowed)
+
+    def test_a_resumed_agent_isnt_told_again(self):
+        environment, message, _ = self.start(resumes=True)
+        self.assertNotIn("OPENAI_API_KEY", environment)
+        self.assertEqual(message, "Build issue #1.")
 
 
 class PathRefusalTest(unittest.TestCase):
