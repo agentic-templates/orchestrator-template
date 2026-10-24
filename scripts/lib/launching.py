@@ -39,10 +39,11 @@ PATTERN_CHARACTERS = "[*?\\"
 CONFIG_NEEDED = ("gh", "git")
 # A key's line names the host it's for, which agents then reach without the auto-mode classifier's review.
 AGENTS_ENV = usage.LOOP / "agents.env"
-# A line as .env files write it: a value in quotes, or one that ends where a comment starts after a space.
+# A line as .env files write it: a value in quotes, or one that ends where a comment starts after a space. Other tools
+# read a backslash in double quotes as an escape, so such a value isn't taken as written.
 AGENT_VARIABLE = re.compile(
     r"(export\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
-    r"(?P<value>'[^']*'|\"[^\"]*\"|[^'\"\s#]\S*(\s+[^\s#]\S*)*|)(\s+#\s*(?P<comment>.*))?"
+    r"(?P<value>'[^']*'|\"[^\"\\\\]*\"|[^'\"\s#]\S*(\s+[^\s#]\S*)*|)(\s+#\s*(?P<comment>.*))?"
 )
 # A host as the sandbox's allowedDomains takes it, which rejects a bare "*".
 HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
@@ -310,12 +311,16 @@ def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
         match = AGENT_VARIABLE.fullmatch(line)
         comment = (match and match["comment"]) or ""
         host = comment.removeprefix("host:").strip() if comment.startswith("host:") else None
-        if not match or (host is not None and not HOST.fullmatch(host)):
-            # The error doesn't quote the line, because it may hold a key.
+        # The errors don't quote the line, because it may hold a key.
+        if not match:
             raise ValueError(
-                f"Line {number} of .loop/agents.env isn't a NAME=value line, as in \"DEEPSEEK_API_KEY=... # host: "
-                'api.deepseek.com", or the host after "# host:" isn\'t a name such as *.example.com, without https://. '
-                "Ask the maintainer to fix the line."
+                f"Line {number} of .loop/agents.env isn't NAME=value, as in \"DEEPSEEK_API_KEY=... # host: "
+                'api.deepseek.com", or has a backslash inside double quotes. Ask the maintainer to fix the line.'
+            )
+        if host is not None and not HOST.fullmatch(host):
+            raise ValueError(
+                f'The host after "# host:" on line {number} of .loop/agents.env isn\'t a name such as *.example.com, '
+                "without https://. Ask the maintainer to fix the line."
             )
         value = match["value"]
         variables[match["name"]] = value[1:-1] if value[:1] in ("'", '"') else value

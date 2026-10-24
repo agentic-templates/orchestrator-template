@@ -159,13 +159,14 @@ class AgentVariablesTest(unittest.TestCase):
             "sk-secret",
             "KEY sk-secret",
             'KEY="sk-secret',
+            'KEY="sk-secret\\nline"',
             "KEY=sk-secret # host:",
             "KEY=sk-secret # host: *",
             "KEY=sk-secret # host: https://api.example.com",
         ):
             with self.subTest(line), self.assertRaises(ValueError) as refusal:
                 launching.parse_agent_variables(f"MODE=fast\n{line}\n")
-            self.assertIn("Line 2 ", str(refusal.exception))
+            self.assertIn("line 2 ", str(refusal.exception).lower())
             self.assertNotIn("sk-secret", str(refusal.exception))
 
     def test_launches_are_refused_while_the_file_has_a_line_it_cant_read(self):
