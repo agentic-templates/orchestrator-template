@@ -297,8 +297,8 @@ def agent_variables() -> tuple[dict[str, str], list[str]]:
 
 
 def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
-    """The variables that each NAME=value line sets, and the hosts that lines name after "# host:". A value keeps
-    everything else on its line, except a pair of quotes around it."""
+    """The variables that each NAME=value line sets, and the hosts that lines name after "# host:". A value is the
+    rest of its line without a pair of quotes around it, and can't contain " #"."""
     variables, hosts = {}, []
     for number, line in enumerate(text.splitlines(), 1):
         line = line.strip()
@@ -307,11 +307,12 @@ def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
         match = AGENT_VARIABLE.fullmatch(line)
         host = match and match["host"]
         if not match or " #" in match["value"] or (host and not HOST.fullmatch(host)):
-            # The line isn't quoted, because it may hold a key.
+            # The error doesn't quote the line, because it may hold a key.
             raise ValueError(
                 f'Line {number} of .loop/agents.env isn\'t NAME=value with an optional "# host: <host>" at its end, '
-                'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". Correct it, and put any other comment on '
-                "a line of its own that starts with #."
+                'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". A host is a name such as api.deepseek.com '
+                "or *.example.com, without https://. Fix the line, and put any other comment on a line of its own that "
+                "starts with #."
             )
         value = match["value"]
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
