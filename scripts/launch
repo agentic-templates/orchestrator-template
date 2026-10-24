@@ -91,6 +91,9 @@ def run(session: launching.Session, record: dict) -> int:
 
 def main() -> int:
     arguments = parse()
+    if refusal := launching.path_refusal():
+        print(refusal)
+        return 2
     if arguments.resume:
         return resume(arguments)
     decisions = metering.decisions()
