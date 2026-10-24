@@ -21,6 +21,17 @@ class AgentSkillsTest(unittest.TestCase):
     def test_an_unknown_agent_type_preloads_nothing(self):
         self.assertEqual(usage.agent_skills("no-such-agent"), [])
 
+    def test_reads_skills_written_as_lines(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        agents = Path(folder.name) / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        definition = "---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n"
+        (agents / "builder-x.md").write_text(definition)
+        with mock.patch.object(usage, "ROOT", Path(folder.name)):
+            self.assertEqual(usage.agent_skills("builder-x"), ["building", "code"])
+            self.assertEqual(usage.agent_config("builder-x"), "opus/default")
+
 
 class RunsElsewhereTest(unittest.TestCase):
     def test_a_live_orchestrator_in_another_session_runs_elsewhere(self):

@@ -418,14 +418,20 @@ def orchestrator_account() -> str | None:
     return orchestrator().get("account")
 
 
-def agent_fields(agent_type: str) -> dict[str, str]:
-    """The fields at the top of an agent type's definition in .claude/agents/, such as its model."""
+def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
+    """The fields at the top of an agent type's definition in .claude/agents/, such as its model. A list written as
+    lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
     path = ROOT / ".claude" / "agents" / f"{agent_type}.md"
-    fields = {}
+    fields: dict[str, str | list[str]] = {}
+    key = ""
     if path.exists():
         for line in path.read_text().split("---")[1].splitlines():
+            if line.strip().startswith("-") and key:
+                fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
+                continue
             key, _, value = line.partition(":")
-            fields[key.strip()] = value.strip()
+            key = key.strip()
+            fields[key] = value.strip()
     return fields
 
 
@@ -437,6 +443,7 @@ def agent_config(agent_type: str) -> str:
 
 def agent_skills(agent_type: str) -> list[str]:
     """The skills that an agent type preloads, from its definition."""
-    return [
-        skill.strip() for skill in agent_fields(agent_type).get("skills", "").strip("[]").split(",") if skill.strip()
-    ]
+    skills = agent_fields(agent_type).get("skills", "")
+    if isinstance(skills, str):
+        skills = skills.strip("[]").split(",")
+    return [skill.strip() for skill in skills if skill.strip()]
