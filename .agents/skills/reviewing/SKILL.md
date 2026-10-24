@@ -9,7 +9,7 @@ description: How to review a pull request or a plan. Read it before you review o
 
 - Compare the change with its issue's "Done when" list and with "Definition of done" in AGENTS.md.
 - Report only what must change: wrong behavior, a missing test, a security problem, or code and text that break the skills. Give each error a case that shows it, such as an input and the wrong result, and say what to change.
-- If a change adds or changes a hook or a check, report the ways an agent could get past it by mistake, such as writing the same command another common way. Don't report ways past it that an agent would only take on purpose, because a hook or a check is there to catch mistakes.
+- If a change adds or changes one of the loop's hooks or checks, report only the ways an agent could get past it by mistake, such as writing the same command another common way.
 - Don't ask for changes that a formatter would make, or for work outside the issue. Put a problem outside the issue in your report instead.
 - Run `scripts/check --review --base <base commit>`, and judge each function it lists in context. Ask for a change only where the function is hard to follow. Moving code into helpers only to lower a count isn't a fix, and neither is a split that makes the code harder to read.
 - Read the pull request's description against the `writing` skill. You may cut or reword sentences, but don't ask for more text.
