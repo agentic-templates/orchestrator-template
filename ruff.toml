@@ -3,8 +3,8 @@ target-version = "py312"
 
 [lint]
 # Beyond the defaults: rules against unused code, ignored errors and blanket or unused suppressions, as the
-# `languages` skill asks for, and limits on arguments and statements. RET505 to RET508 enforce the `code` skill's
-# "Return early". complexipy in `scripts/check` counts cognitive complexity.
+# `languages` skill asks for, and limits on arguments and statements. RET505 to RET508 catch one case of the `code`
+# skill's "Return early". complexipy in `scripts/check` counts cognitive complexity.
 extend-select = [
     "B", "BLE", "ERA", "I", "PGH004", "PLR0913", "PLR0915", "RET505", "RET506", "RET507", "RET508", "RUF100", "S110",
     "SIM", "UP",
