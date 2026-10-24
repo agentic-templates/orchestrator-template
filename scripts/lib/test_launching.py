@@ -125,7 +125,7 @@ def run_git(cwd: Path, *args: str) -> str:
 
 
 class NestedRepositoryTest(unittest.TestCase):
-    """A builder's worktree, in which the agent planted a nested repository whose config runs a program that leaves a
+    """A builder's worktree, in which the agent made a nested repository whose config runs a program that leaves a
     marker, as an agent can from inside the sandbox."""
 
     def setUp(self):

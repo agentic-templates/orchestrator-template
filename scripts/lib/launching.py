@@ -30,7 +30,7 @@ SECRETS = (
     ".netrc", ".npmrc", ".docker", ".kube", ".git-credentials", ".config/git/credentials", ".zsh_history",
     ".zsh_sessions", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history",
 )  # fmt: skip
-# The folders in ~/.config that agents' commands need. Agents read no other. Git stops when it can't read its own.
+# The only folders in ~/.config that agents may read. Git exits with an error when it can't read its own.
 CONFIG_NEEDED = ("gh", "git")
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
@@ -55,7 +55,7 @@ def git(*args: str, cwd: Path = ROOT) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-# An agent can plant a nested repository in its worktree whose config names programs, which git outside the sandbox
+# An agent can make a nested repository in its worktree whose config names programs, which git outside the sandbox
 # would run. These settings keep git from running any, except when it stages a nested repository, so callers leave out
 # what nested_repositories() finds.
 SAFE_GIT = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=all")
@@ -68,11 +68,11 @@ def worktree_git(worktree: Path, *args: str) -> str:
 
 def nested_repositories(worktree: Path) -> list[str]:
     """The nested git repositories in the worktree: registered submodules, other repositories staged as gitlinks,
-    and untracked ones. Staging one runs the programs its config names, and the agent can write that config. Neither
-    listing reads a nested repository's config."""
+    and untracked ones. Neither `git ls-files` call reads a nested repository's config."""
     staged = worktree_git(worktree, "ls-files", "--stage", "-z").split("\0")
     gitlinks = [entry.split("\t", 1)[1] for entry in staged if entry.startswith("160000 ")]
-    # git lists an untracked nested repository as its folder, and every other untracked path as a file.
+    # git ls-files lists an untracked nested repository as its folder, ending in "/", and every other untracked file
+    # on its own.
     untracked = worktree_git(worktree, "ls-files", "--others", "--exclude-standard", "-z").split("\0")
     return gitlinks + [path.removesuffix("/") for path in untracked if path.endswith("/")]
 
@@ -221,8 +221,8 @@ def settings() -> str:
     # A path that may be a file or a folder is denied both ways.
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
     deny = project["permissions"]["deny"]
-    # The project's rules for its own files, such as .env files, apply inside the agent's worktree, which has none.
-    # The maintainer's are in the main checkout.
+    # The project's rules for its own files, such as .env files, match only in the agent's worktree, which has none of
+    # those files. The maintainer's copies are in the main checkout.
     rules += [rule for rule in map(in_main_checkout, deny) if rule]
     permissions = project["permissions"] | {"deny": deny + rules}
     credentials = sandbox.setdefault("credentials", {})
@@ -237,16 +237,17 @@ def in_main_checkout(rule: str) -> str | None:
         return None
     pattern = rule.removeprefix("Read(").removeprefix("./")
     # Claude Code matches a pattern without a leading slash from the working directory, and some, such as .env and
-    # secrets/**, in every folder below it. Denying each in every folder of the main checkout is safe.
+    # secrets/**, in every folder below it. Matching each pattern in every folder of the main checkout can only deny
+    # more than the project's rule does.
     if not pattern.startswith(("/", "**/")):
         pattern = f"**/{pattern}"
     return f"Read({rule_path(ROOT)}/{pattern.removeprefix('/')}"
 
 
 def secret_paths() -> list[Path]:
-    """What agents mustn't read: the places that commonly hold secrets, each folder in ~/.config but those their
-    commands need, and every account's own folder. Claude Code reads its account's folder outside the sandbox, so
-    an agent's commands never need one."""
+    """What agents mustn't read: the places that commonly hold secrets, everything in ~/.config but what their
+    commands need, and every account's files. Claude Code reads its account's files outside the sandbox, so an
+    agent's commands never need them."""
     home = Path.home()
     config = home / ".config"
     configs = [path for path in config.iterdir() if path.name not in CONFIG_NEEDED] if config.is_dir() else []
@@ -522,7 +523,7 @@ def unpushed(worktree: Path) -> int:
 
 
 def remove_worktree(worktree: Path) -> str:
-    """Removes the worktree with what's left in it: a reviewer's scratch work, because its result is a review or a
-    comment, or what a save leaves out, such as nested repositories."""
+    """Removes the worktree and everything left in it, such as a reviewer's scratch work or the nested repositories a
+    save leaves out. A reviewer's scratch work can go, because its result is a review or a comment."""
     git(*SAFE_GIT, "worktree", "remove", "--force", str(worktree))
     return ""
