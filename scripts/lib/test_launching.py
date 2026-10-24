@@ -134,28 +134,31 @@ class AgentVariablesTest(unittest.TestCase):
             "# Keys for the summarizer\n"
             "\n"
             "DEEPSEEK_API_KEY=sk-1 # host: api.deepseek.com\n"
-            "MODE=fast\n"
-            'GREETING="hello there"\n'
+            "export MODE=fast # for the tests\n"
+            'GREETING="hello # there" # host: greetings.example.com\n'
             "HASHED=a#b\n"
-            "UPLOAD_KEY=k-2 # host: *.uploads.example.com:8443\n"
+            "SPACED = two words\n"
+            "EMPTY=\n"
+            "UPLOAD_KEY='k-2'\t# host: *.uploads.example.com:8443\n"
         )
         variables, hosts = launching.parse_agent_variables(text)
         expected = {
             "DEEPSEEK_API_KEY": "sk-1",
             "MODE": "fast",
-            "GREETING": "hello there",
+            "GREETING": "hello # there",
             "HASHED": "a#b",
+            "SPACED": "two words",
+            "EMPTY": "",
             "UPLOAD_KEY": "k-2",
         }
         self.assertEqual(variables, expected)
-        self.assertEqual(hosts, ["api.deepseek.com", "*.uploads.example.com:8443"])
+        self.assertEqual(hosts, ["api.deepseek.com", "greetings.example.com", "*.uploads.example.com:8443"])
 
     def test_a_line_it_cant_read_is_refused_by_its_number_without_its_value(self):
         for line in (
             "sk-secret",
-            "export KEY=sk-secret",
-            "KEY=sk-secret # my key",
-            "KEY=sk-secret\t# my key",
+            "KEY sk-secret",
+            'KEY="sk-secret',
             "KEY=sk-secret # host:",
             "KEY=sk-secret # host: *",
             "KEY=sk-secret # host: https://api.example.com",
@@ -171,7 +174,7 @@ class AgentVariablesTest(unittest.TestCase):
         path = Path(folder.name) / "agents.env"
         with mock.patch.object(launching, "AGENTS_ENV", path):
             self.assertEqual(launching.agent_variables_refusal(), "")
-            path.write_text("KEY=sk-secret # my key\n")
+            path.write_text("KEY=sk-secret # host: https://api.example.com\n")
             self.assertIn("No agent can start", launching.agent_variables_refusal())
 
 

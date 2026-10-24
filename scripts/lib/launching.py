@@ -39,7 +39,11 @@ PATTERN_CHARACTERS = "[*?\\"
 CONFIG_NEEDED = ("gh", "git")
 # A key's line names the host it's for, which agents then reach without the auto-mode classifier's review.
 AGENTS_ENV = usage.LOOP / "agents.env"
-AGENT_VARIABLE = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*?)(\s+# host: *(?P<host>\S+))?")
+# A line as .env files write it: a value in quotes, or one that ends where a comment starts after a space.
+AGENT_VARIABLE = re.compile(
+    r"(export\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*"
+    r"(?P<value>'[^']*'|\"[^\"]*\"|[^'\"\s#]\S*(\s+[^\s#]\S*)*|)(\s+#\s*(?P<comment>.*))?"
+)
 # A host as the sandbox's allowedDomains takes it, which rejects a bare "*".
 HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
 # Matched against the words between underscores in a name, so that KEYBOARD_LAYOUT isn't left out.
@@ -296,27 +300,25 @@ def agent_variables() -> tuple[dict[str, str], list[str]]:
 
 
 def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
-    """The variables that each NAME=value line sets, and the hosts that lines name after "# host:". A value is the
-    rest of its line without a pair of quotes around it, and can't contain a # after a space."""
+    """The variables that the lines of a .env file set, and the hosts that lines name in a comment that starts with
+    "host:"."""
     variables, hosts = {}, []
     for number, line in enumerate(text.splitlines(), 1):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         match = AGENT_VARIABLE.fullmatch(line)
-        host = match and match["host"]
-        if not match or re.search(r"\s#", match["value"]) or (host and not HOST.fullmatch(host)):
+        comment = (match and match["comment"]) or ""
+        host = comment.removeprefix("host:").strip() if comment.startswith("host:") else None
+        if not match or (host is not None and not HOST.fullmatch(host)):
             # The error doesn't quote the line, because it may hold a key.
             raise ValueError(
-                f'Line {number} of .loop/agents.env isn\'t NAME=value with an optional "# host: <host>" at its end, '
-                'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". A host is a name such as *.example.com, '
-                "without https://. A comment goes on a line of its own that starts with #. Ask the maintainer to fix "
-                "the line."
+                f"Line {number} of .loop/agents.env isn't a NAME=value line, as in \"DEEPSEEK_API_KEY=... # host: "
+                'api.deepseek.com", or the host after "# host:" isn\'t a name such as *.example.com, without https://. '
+                "Ask the maintainer to fix the line."
             )
         value = match["value"]
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
-        variables[match["name"]] = value
+        variables[match["name"]] = value[1:-1] if value[:1] in ("'", '"') else value
         if host:
             hosts.append(host)
     return variables, hosts
