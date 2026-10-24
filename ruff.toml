@@ -3,8 +3,13 @@ target-version = "py312"
 
 [lint]
 # Beyond the defaults: limits on arguments and statements, rules against hidden errors, unused or blanket
-# suppressions, and commented-out code, as the `languages` skill asks for. complexipy counts cognitive complexity.
-extend-select = ["B", "BLE", "ERA", "I", "PGH004", "PLR0913", "PLR0915", "RUF100", "S110", "SIM", "UP"]
+# suppressions, and commented-out code, as the `languages` skill asks for. RET505 to RET508 refuse an `else` after a
+# branch that returns, raises, continues or breaks, as the `code` skill's "Return early" asks. complexipy counts
+# cognitive complexity.
+extend-select = [
+    "B", "BLE", "ERA", "I", "PGH004", "PLR0913", "PLR0915", "RET505", "RET506", "RET507", "RET508", "RUF100", "S110",
+    "SIM", "UP",
+]
 
 [lint.pylint]
 max-args = 6
