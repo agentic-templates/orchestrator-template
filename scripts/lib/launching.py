@@ -4,6 +4,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import select
 import signal
 import stat
@@ -36,6 +37,14 @@ SECRETS = (
 PATTERN_CHARACTERS = "[*?\\"
 # The only folders in ~/.config that agents may read. Git exits with an error when it can't read its own.
 CONFIG_NEEDED = ("gh", "git")
+# The variables that the maintainer gives every agent, such as API keys. A key's line names the host it's for, which
+# agents then reach without the auto-mode classifier's review.
+AGENTS_ENV = usage.LOOP / "agents.env"
+AGENT_VARIABLE = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*?)(\s+# host: *(?P<host>\S+))?")
+# A host as the sandbox's allowedDomains takes it, which rejects a bare "*".
+HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
+# Inherited variables whose names contain one of these words, such as OPENAI_API_KEY, may hold secrets.
+SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
 
@@ -215,12 +224,14 @@ def holding(porcelain: str, branch: str) -> list[Path]:
 def settings() -> str:
     """The project's permissions and sandbox, given again on the command line. A headless session loads the
     project's own settings from its worktree, but ignores their allow rules in a folder its account hasn't
-    trusted. The sandbox also lets the agent write its own uv cache, and the agent can't ask to run a command
-    outside it, because the allow rules would approve that without asking."""
+    trusted. The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and
+    the agent can't ask to run a command outside it, because the allow rules would approve that without asking."""
     project = json.loads((ROOT / ".claude" / "settings.json").read_text())
     sandbox = project["sandbox"] | {"allowUnsandboxedCommands": False}
     filesystem = sandbox.setdefault("filesystem", {})
     filesystem["allowWrite"] = [*filesystem.get("allowWrite", []), str(UV_CACHE)]
+    network = sandbox.setdefault("network", {})
+    network["allowedDomains"] = [*network.get("allowedDomains", []), *agent_variables()[1]]
     secrets = [rule_path(path) for path in secret_paths()]
     # A path that may be a file or a folder is denied both ways.
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
@@ -235,17 +246,18 @@ def settings() -> str:
 
 
 def in_main_checkout(rule: str) -> str | None:
-    """The project's rule against reading some of its own files, for the same files in the main checkout. Other
-    rules, and rules for paths from the home folder or absolute ones, give None."""
-    if not rule.startswith("Read(") or rule.startswith(("Read(~/", "Read(//")):
+    """The project's rule against reading or editing some of its own files, for the same files in the main
+    checkout. Other rules, and rules for paths from the home folder or absolute ones, give None."""
+    tool, _, pattern = rule.partition("(")
+    if tool not in ("Read", "Edit") or pattern.startswith(("~/", "//")):
         return None
-    pattern = rule.removeprefix("Read(").removeprefix("./")
+    pattern = pattern.removeprefix("./")
     # Claude Code matches a pattern without a leading slash from the working directory, and some, such as .env and
     # secrets/**, in every folder below it. Matching each pattern in every folder of the main checkout can only deny
     # more than the project's rule does.
     if not pattern.startswith(("/", "**/")):
         pattern = f"**/{pattern}"
-    return f"Read({rule_path(ROOT)}/{pattern.removeprefix('/')}"
+    return f"{tool}({rule_path(ROOT)}/{pattern.removeprefix('/')}"
 
 
 def secret_paths() -> list[Path]:
@@ -278,6 +290,65 @@ def path_refusal() -> str:
     return ""
 
 
+def agent_variables() -> tuple[dict[str, str], list[str]]:
+    """The variables and hosts in .loop/agents.env. Raises ValueError if a line can't be read."""
+    text = AGENTS_ENV.read_text() if AGENTS_ENV.exists() else ""
+    return parse_agent_variables(text)
+
+
+def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
+    """The variables that each NAME=value line sets, and the hosts that lines name after "# host:". A value keeps
+    everything else on its line, except a pair of quotes around it."""
+    variables, hosts = {}, []
+    for number, line in enumerate(text.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = AGENT_VARIABLE.fullmatch(line)
+        host = match and match["host"]
+        if not match or " #" in match["value"] or (host and not HOST.fullmatch(host)):
+            # The line isn't quoted, because it may hold a key.
+            raise ValueError(
+                f'Line {number} of .loop/agents.env isn\'t NAME=value with an optional "# host: <host>" at its end, '
+                'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". Correct it, and put any other comment on '
+                "a line of its own that starts with #."
+            )
+        value = match["value"]
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        variables[match["name"]] = value
+        if host:
+            hosts.append(host)
+    return variables, hosts
+
+
+def agent_variables_refusal() -> str:
+    """Why no agent can start, if .loop/agents.env has a line it can't read. Otherwise an empty string."""
+    try:
+        agent_variables()
+    except ValueError as error:
+        return f"No agent can start. {error}"
+    return ""
+
+
+def without_secrets(environment: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    """The environment without the variables whose names may hold secrets, and those variables' names. Agents
+    inherit the orchestrator's environment, where the maintainer may have exported a key."""
+
+    def may_be_secret(name: str) -> bool:
+        return not SECRET_WORDS.isdisjoint(name.upper().split("_"))
+
+    kept = {name: value for name, value in environment.items() if not may_be_secret(name)}
+    return kept, sorted(name for name in environment if may_be_secret(name))
+
+
+def left_out_message(names: list[str]) -> str:
+    return (
+        f"Your environment leaves out {', '.join(names)}, because their names look like secrets. If your work needs "
+        "one of them, say so in your report, so that the maintainer can add it to .loop/agents.env."
+    )
+
+
 def github_login() -> dict[str, str]:
     """The environment that gives an agent's gh and git the maintainer's GitHub login, because the agent can't read
     the login keychain, where gh keeps it. The empty first entry clears the helpers that git's config files set, such
@@ -308,8 +379,10 @@ def start(
     os.mkfifo(input_path)
     # Opened for reading and writing, so that the agent's input stays open between messages.
     input_fd = os.open(input_path, os.O_RDWR)
+    inherited, secret_names = without_secrets(usage.environment_for(account))
     environment = {
-        **usage.environment_for(account),
+        **inherited,
+        **agent_variables()[0],
         **github_login(),
         "LOOP_AGENT_ID": agent_id,
         "DISABLE_AUTO_COMPACT": "1",
@@ -318,11 +391,15 @@ def start(
         "UV_CACHE_DIR": str(UV_CACHE),
         "UV_TOOL_DIR": str(UV_CACHE / "tools"),
     }
+    resumes = bool(usage.transcript(account.name, session_id))
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
         "--verbose", "--settings", settings(), "--name", agent_id,
-        *(["--resume", session_id] if usage.transcript(account.name, session_id) else ["--session-id", session_id]),
+        *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
+    left_out = [name for name in secret_names if name not in environment]
+    if left_out and not resumes:
+        prompt = f"{prompt}\n\n{left_out_message(left_out)}"
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )

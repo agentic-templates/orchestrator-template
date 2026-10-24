@@ -24,6 +24,7 @@
       "Read(**/.env.*.local)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)",
+      "Edit(/.loop/agents.env)",
       "Bash(sudo *)",
       "Bash(pkill *)",
       "Bash(killall *)",

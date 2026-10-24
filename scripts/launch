@@ -19,6 +19,11 @@ account room.
 - A researcher gets the research issue's number.
 - With --resume, an agent that has stopped continues its own session, with its whole context, from the message,
   such as a builder given its review's errors.
+
+Every agent gets the variables set in .loop/agents.env, one NAME=value a line. A key's line ends with the host
+it's for, which agents can then reach, such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". Agents can read
+these values, so give them only keys with a spending limit. Agents don't inherit the variables whose names contain
+the word TOKEN, KEY, SECRET, PASSWORD or CREDENTIALS, such as OPENAI_API_KEY.
 """
 
 import argparse
@@ -91,7 +96,7 @@ def run(session: launching.Session, record: dict) -> int:
 
 def main() -> int:
     arguments = parse()
-    if refusal := launching.path_refusal():
+    if refusal := launching.path_refusal() or launching.agent_variables_refusal():
         print(refusal)
         return 2
     if arguments.resume:
