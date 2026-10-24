@@ -37,7 +37,8 @@ SECRETS = (
 PATTERN_CHARACTERS = "[*?\\"
 # The only folders in ~/.config that agents may read. Git exits with an error when it can't read its own.
 CONFIG_NEEDED = ("gh", "git")
-# A key's line names the host it's for, which agents then reach without the auto-mode classifier's review.
+# A key's line names the host it's for, which agents then reach without the auto-mode classifier's review. The host
+# stays on its key's line, so that removing the key also takes away the host.
 AGENTS_ENV = usage.LOOP / "agents.env"
 # A line as .env files write it: a value in quotes, or one that ends where a comment starts after a space. Other tools
 # read a backslash in double quotes as an escape, so such a value isn't taken as written.
