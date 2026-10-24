@@ -21,9 +21,8 @@ account room.
   such as a builder given its review's errors.
 
 Every agent gets the variables in .loop/agents.env, and can reach the host that a line ends with, as in
-"DEEPSEEK_API_KEY=... # host: api.deepseek.com". Agents can read these values, so the maintainer puts only keys
-with a spending limit there. Agents don't inherit the variables whose names contain the word TOKEN, KEY, SECRET,
-PASSWORD or CREDENTIALS, such as OPENAI_API_KEY.
+"DEEPSEEK_API_KEY=... # host: api.deepseek.com". Agents can read these values. Agents don't inherit the variables
+whose names contain the word TOKEN, KEY, SECRET, PASSWORD or CREDENTIALS, such as OPENAI_API_KEY.
 """
 
 import argparse
