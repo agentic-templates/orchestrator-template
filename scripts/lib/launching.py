@@ -298,7 +298,7 @@ def agent_variables() -> tuple[dict[str, str], list[str]]:
 
 def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
     """The variables that each NAME=value line sets, and the hosts that lines name after "# host:". A value is the
-    rest of its line without a pair of quotes around it, and can't contain " #"."""
+    rest of its line without a pair of quotes around it, and can't contain a # after a space."""
     variables, hosts = {}, []
     for number, line in enumerate(text.splitlines(), 1):
         line = line.strip()
@@ -306,13 +306,13 @@ def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
             continue
         match = AGENT_VARIABLE.fullmatch(line)
         host = match and match["host"]
-        if not match or " #" in match["value"] or (host and not HOST.fullmatch(host)):
+        if not match or re.search(r"\s#", match["value"]) or (host and not HOST.fullmatch(host)):
             # The error doesn't quote the line, because it may hold a key.
             raise ValueError(
                 f'Line {number} of .loop/agents.env isn\'t NAME=value with an optional "# host: <host>" at its end, '
                 'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". A host is a name such as api.deepseek.com '
-                "or *.example.com, without https://. Fix the line, and put any other comment on a line of its own that "
-                "starts with #."
+                "or *.example.com, without https://. Ask the maintainer to fix it. A comment goes on a line of its own "
+                "that starts with #."
             )
         value = match["value"]
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
@@ -398,9 +398,9 @@ def start(
         "--verbose", "--settings", settings(), "--name", agent_id,
         *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
-    left_out = [name for name in secret_names if name not in environment]
-    if left_out and not resumes:
-        prompt = f"{prompt}\n\n{left_out_message(left_out)}"
+    dropped = [name for name in secret_names if name not in environment]
+    if dropped and not resumes:
+        prompt = f"{prompt}\n\n{left_out_message(dropped)}"
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )

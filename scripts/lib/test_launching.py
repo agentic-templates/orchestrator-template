@@ -155,6 +155,7 @@ class AgentVariablesTest(unittest.TestCase):
             "sk-secret",
             "export KEY=sk-secret",
             "KEY=sk-secret # my key",
+            "KEY=sk-secret\t# my key",
             "KEY=sk-secret # host:",
             "KEY=sk-secret # host: *",
             "KEY=sk-secret # host: https://api.example.com",
