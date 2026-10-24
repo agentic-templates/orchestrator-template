@@ -22,7 +22,7 @@ account room.
 
 Every agent gets the variables set in .loop/agents.env, one NAME=value a line. A key's line ends with "# host:
 <host>", and agents can then reach that host, as in "DEEPSEEK_API_KEY=... # host: api.deepseek.com". Agents can read
-these values, so give them only keys with a spending limit. Agents don't inherit the variables whose names contain
+these values, so the maintainer puts only keys with a spending limit there. Agents don't inherit the variables whose names contain
 the word TOKEN, KEY, SECRET, PASSWORD or CREDENTIALS, such as OPENAI_API_KEY.
 """
 
