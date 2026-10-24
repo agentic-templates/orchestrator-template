@@ -25,11 +25,15 @@ WORKTREES = usage.LOOP / "worktrees"
 # Agents' own uv cache and tools. The scripts and hooks that run outside the sandbox use the default cache and Python, which
 # agents may only read, so that nothing an agent writes runs outside the sandbox.
 UV_CACHE = usage.LOOP / "agent-uv-cache"
-# Places in the home folder that commonly hold secrets, which agents mustn't read.
+# Places in the home folder that commonly hold secrets, which agents mustn't read. Claude Code's sandbox lets every
+# command reach the keychain's services, so only denying Library/Keychains keeps commands from reading the logins in
+# the login keychain, such as gh's and Claude Code's.
 SECRETS = (
     ".netrc", ".npmrc", ".docker", ".kube", ".git-credentials", ".config/git/credentials", ".zsh_history",
-    ".zsh_sessions", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history",
+    ".zsh_sessions", ".bash_history", ".local/share/fish", ".python_history", ".node_repl_history", "Library/Keychains",
 )  # fmt: skip
+# Characters that Claude Code's permission rules read as patterns or escapes, not as part of a name.
+PATTERN_CHARACTERS = "[*?\\"
 # The only folders in ~/.config that agents may read. Git exits with an error when it can't read its own.
 CONFIG_NEEDED = ("gh", "git")
 # The agent counts as done once nothing has come from it for this long after its report.
@@ -251,9 +255,41 @@ def secret_paths() -> list[Path]:
     home = Path.home()
     config = home / ".config"
     configs = [path for path in config.iterdir() if path.name not in CONFIG_NEEDED] if config.is_dir() else []
-    accounts = [home / ".claude", home / ".claude.json", home / ".codex"]
-    accounts += [Path(os.path.expanduser(account.home)) for account in usage.accounts() if account.home]
+    accounts = [home / ".claude", home / ".claude.json", home / ".codex", *account_folders()]
     return sorted({*(home / path for path in SECRETS), *configs, *accounts})
+
+
+def account_folders() -> list[Path]:
+    """The folders of the accounts that .loop/accounts.json gives a folder of their own."""
+    return [Path(os.path.expanduser(account.home)) for account in usage.accounts() if account.home]
+
+
+def path_refusal() -> str:
+    """Why no agent can start, if the path of the home folder, the main checkout or an account's folder contains a
+    character that permission rules don't read as a plain character, because then the rules that deny agents secrets
+    might not match. Otherwise an empty string."""
+    for path in (Path.home(), ROOT, *account_folders()):
+        if found := [character for character in PATTERN_CHARACTERS if character in str(path)]:
+            return (
+                f"No agent can start, because {path} contains {' and '.join(found)}, which permission rules don't read "
+                "as plain characters, so the rules that keep agents from reading the secrets in it might not match "
+                "those files. Ask the maintainer to rename or move it so that its path has none of them."
+            )
+    return ""
+
+
+def github_login() -> dict[str, str]:
+    """The environment that gives an agent's gh and git the maintainer's GitHub login, because the agent can't read
+    the login keychain, where gh keeps it. The empty first entry clears the helpers that git's config files set, such
+    as osxkeychain, so git asks only gh."""
+    return {
+        "GH_TOKEN": github.gh("auth", "token"),
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "",
+        "GIT_CONFIG_KEY_1": "credential.helper",
+        "GIT_CONFIG_VALUE_1": "!gh auth git-credential",
+    }
 
 
 def rule_path(path: Path) -> str:
@@ -272,7 +308,9 @@ def start(
     os.mkfifo(input_path)
     # Opened for reading and writing, so that the agent's input stays open between messages.
     input_fd = os.open(input_path, os.O_RDWR)
-    environment = usage.environment_for(account) | {
+    environment = {
+        **usage.environment_for(account),
+        **github_login(),
         "LOOP_AGENT_ID": agent_id,
         "DISABLE_AUTO_COMPACT": "1",
         # The hooks run outside the sandbox, so they run from the main checkout, never from the agent's own copy.

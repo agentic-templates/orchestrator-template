@@ -88,6 +88,7 @@ class SettingsTest(unittest.TestCase):
             "Read(~/.config/anthropic/**)",
             "Read(~/.claude-2/**)",
             "Read(~/.claude.json)",
+            "Read(~/Library/Keychains/**)",
         ]
         for rule in expected:
             self.assertIn(rule, denied)
@@ -118,6 +119,89 @@ class SettingsTest(unittest.TestCase):
             for path in ("**/.env", "**/.env.*", "secrets/**", "**/keys/**", "**/key.pem", "**/~secrets")
         ]
         self.assertEqual(in_main, expected)
+
+
+class PathRefusalTest(unittest.TestCase):
+    def refusal(self, home: Path, main: Path, account_folder: Path | None = None) -> str:
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        accounts = Path(folder.name) / "accounts.json"
+        account = {"name": "claude-2", "provider": "claude"} | ({"home": str(account_folder)} if account_folder else {})
+        accounts.write_text(json.dumps([account]))
+        with (
+            mock.patch.object(launching, "ROOT", main),
+            mock.patch.object(Path, "home", lambda: home),
+            mock.patch.object(launching.usage, "ACCOUNTS", accounts),
+        ):
+            return launching.path_refusal()
+
+    def test_a_home_folder_with_a_pattern_character_is_refused(self):
+        for character in "[*?\\":
+            home = Path(f"/Volumes/some{character}one")
+            with self.subTest(character=character):
+                refusal = self.refusal(home, home / "dev" / "app")
+                self.assertIn(f"{home} contains", refusal)
+                self.assertIn("rename or move it", refusal)
+
+    def test_a_main_checkout_with_a_pattern_character_is_refused(self):
+        home = Path("/Volumes/someone")
+        for character in "[*?\\":
+            main = home / "dev" / f"app{character}old"
+            with self.subTest(character=character):
+                self.assertIn(f"{main} contains", self.refusal(home, main))
+
+    def test_an_account_folder_with_a_pattern_character_is_refused(self):
+        home = Path("/Volumes/someone")
+        for character in "[*?\\":
+            account_folder = Path(f"/Volumes/accounts/claude{character}2")
+            with self.subTest(character=character):
+                refusal = self.refusal(home, home / "dev" / "app", account_folder)
+                self.assertIn(f"{account_folder} contains", refusal)
+
+    def test_plain_paths_are_accepted(self):
+        home = Path("/Volumes/some-one")
+        self.assertEqual(self.refusal(home, home / "dev" / "my app", Path("/Volumes/accounts/claude-2")), "")
+
+
+class GithubLoginTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        gh = self.folder / "bin" / "gh"
+        gh.parent.mkdir()
+        # Stands in for gh, which would read the maintainer's real login.
+        gh.write_text(
+            '#!/bin/sh\ncase "$*" in\n'
+            '"auth token") echo the-token ;;\n'
+            '"auth git-credential get") printf "username=x-access-token\\npassword=from-gh\\n" ;;\n'
+            "esac\n"
+        )
+        gh.chmod(0o755)
+        self.planted = self.folder / "planted-helper-ran"
+        config = self.folder / "gitconfig"
+        # Git adds the action, such as "get", as an argument, which the function ignores.
+        config.write_text(f'[credential]\n\thelper = "!f() {{ touch {self.planted}; }}; f"\n')
+        environment = {"PATH": f"{gh.parent}:{os.environ['PATH']}", "GIT_CONFIG_GLOBAL": str(config)}
+        patched = mock.patch.dict(os.environ, environment | {"GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def test_gh_gets_the_maintainers_token(self):
+        self.assertEqual(launching.github_login()["GH_TOKEN"], "the-token")
+
+    def test_git_asks_only_gh_for_a_login(self):
+        credential = subprocess.run(
+            ["git", "credential", "fill"],
+            cwd=self.folder,
+            input="protocol=https\nhost=github.com\n\n",
+            env=os.environ | launching.github_login(),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertIn("password=from-gh", credential.stdout)
+        self.assertFalse(self.planted.exists())
 
 
 def run_git(cwd: Path, *args: str) -> str:
