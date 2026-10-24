@@ -37,13 +37,12 @@ SECRETS = (
 PATTERN_CHARACTERS = "[*?\\"
 # The only folders in ~/.config that agents may read. Git exits with an error when it can't read its own.
 CONFIG_NEEDED = ("gh", "git")
-# The variables that the maintainer gives every agent, such as API keys. A key's line names the host it's for, which
-# agents then reach without the auto-mode classifier's review.
+# A key's line names the host it's for, which agents then reach without the auto-mode classifier's review.
 AGENTS_ENV = usage.LOOP / "agents.env"
 AGENT_VARIABLE = re.compile(r"(?P<name>[A-Za-z_][A-Za-z0-9_]*)=(?P<value>.*?)(\s+# host: *(?P<host>\S+))?")
 # A host as the sandbox's allowedDomains takes it, which rejects a bare "*".
 HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
-# Inherited variables whose names contain one of these words, such as OPENAI_API_KEY, may hold secrets.
+# Matched against the words between underscores in a name, so that KEYBOARD_LAYOUT isn't left out.
 SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
@@ -310,9 +309,9 @@ def parse_agent_variables(text: str) -> tuple[dict[str, str], list[str]]:
             # The error doesn't quote the line, because it may hold a key.
             raise ValueError(
                 f'Line {number} of .loop/agents.env isn\'t NAME=value with an optional "# host: <host>" at its end, '
-                'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". A host is a name such as api.deepseek.com '
-                "or *.example.com, without https://. Ask the maintainer to fix it. A comment goes on a line of its own "
-                "that starts with #."
+                'such as "DEEPSEEK_API_KEY=... # host: api.deepseek.com". A host is a name such as *.example.com, '
+                "without https://. A comment goes on a line of its own that starts with #. Ask the maintainer to fix "
+                "the line."
             )
         value = match["value"]
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
@@ -345,8 +344,8 @@ def without_secrets(environment: dict[str, str]) -> tuple[dict[str, str], list[s
 
 def left_out_message(names: list[str]) -> str:
     return (
-        f"Your environment leaves out {', '.join(names)}, because their names look like secrets. If your work needs "
-        "one of them, say so in your report, so that the maintainer can add it to .loop/agents.env."
+        f"Your environment leaves out {', '.join(names)}. If your work needs one of them, say so in your report, so "
+        "that the maintainer can add it to .loop/agents.env."
     )
 
 

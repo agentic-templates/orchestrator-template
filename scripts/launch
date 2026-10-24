@@ -20,10 +20,10 @@ account room.
 - With --resume, an agent that has stopped continues its own session, with its whole context, from the message,
   such as a builder given its review's errors.
 
-Every agent gets the variables set in .loop/agents.env, one NAME=value a line. A key's line ends with "# host:
-<host>", and agents can then reach that host, as in "DEEPSEEK_API_KEY=... # host: api.deepseek.com". Agents can read
-these values, so the maintainer puts only keys with a spending limit there. Agents don't inherit the variables whose
-names contain the word TOKEN, KEY, SECRET, PASSWORD or CREDENTIALS, such as OPENAI_API_KEY.
+Every agent gets the variables in .loop/agents.env, and can reach the host that a line ends with, as in
+"DEEPSEEK_API_KEY=... # host: api.deepseek.com". Agents can read these values, so the maintainer puts only keys
+with a spending limit there. Agents don't inherit the variables whose names contain the word TOKEN, KEY, SECRET,
+PASSWORD or CREDENTIALS, such as OPENAI_API_KEY.
 """
 
 import argparse

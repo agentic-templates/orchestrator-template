@@ -228,7 +228,7 @@ class StartTest(unittest.TestCase):
         self.assertEqual(environment["DEEPSEEK_API_KEY"], "from-file")
         self.assertEqual(environment["GH_TOKEN"], "the-loops")
         self.assertTrue(message.startswith("Build issue #1.\n\n"))
-        self.assertIn("leaves out OPENAI_API_KEY,", message)
+        self.assertIn("leaves out OPENAI_API_KEY.", message)
         self.assertNotIn("DEEPSEEK_API_KEY", message)
         self.assertNotIn("GH_TOKEN", message)
         allowed = json.loads(command[command.index("--settings") + 1])["sandbox"]["network"]["allowedDomains"]
