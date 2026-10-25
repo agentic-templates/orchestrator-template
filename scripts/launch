@@ -95,7 +95,7 @@ def run(session: launching.Session, record: dict) -> int:
 
 def main() -> int:
     arguments = parse()
-    if refusal := launching.path_refusal() or launching.agent_variables_refusal():
+    if refusal := launching.path_refusal() or launching.agent_variables_refusal() or launching.mcp_json_refusal():
         print(refusal)
         return 2
     if arguments.resume:

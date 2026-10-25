@@ -6,6 +6,7 @@ import json
 import os
 import re
 import select
+import shlex
 import signal
 import stat
 import subprocess
@@ -23,8 +24,8 @@ import usage
 
 ROOT = usage.ROOT
 WORKTREES = usage.LOOP / "worktrees"
-# Agents' own uv cache and tools. The scripts and hooks that run outside the sandbox use the default cache and Python, which
-# agents may only read, so that nothing an agent writes runs outside the sandbox.
+# Agents' own uv cache and tools. The scripts, hooks and MCP servers that run outside the sandbox use the default cache
+# and Python, which agents may only read, so that nothing an agent writes runs outside the sandbox.
 UV_CACHE = usage.LOOP / "agent-uv-cache"
 # Places in the home folder that commonly hold secrets, which agents mustn't read. Claude Code's sandbox lets every
 # command reach the keychain's services, so only denying Library/Keychains keeps commands from reading the logins in
@@ -52,6 +53,11 @@ HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
 SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
+# Read from the main checkout, because a branch could add a server to its own copy.
+MCP_JSON = ROOT / ".mcp.json"
+# An MCP server's command runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the
+# agents' uv cache.
+SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
 
 
 @dataclass
@@ -67,6 +73,8 @@ class Session:
     last_output: float = field(default_factory=time.time)
     # The issue's hand-off note, deleted once the agent gives a real answer.
     note: Path | None = None
+    # The number of background commands and subagents that the session last reported as running.
+    background_tasks: int = 0
 
 
 def git(*args: str, cwd: Path = ROOT) -> str:
@@ -400,9 +408,12 @@ def start(
         "UV_TOOL_DIR": str(UV_CACHE / "tools"),
     }
     resumes = bool(usage.transcript(account.name, session_id))
+    # A headless session starts every MCP server it finds without asking. --strict-mcp-config leaves out the account's
+    # own servers and claude.ai connectors, because through them a prompt injection could reach the services the
+    # maintainer connected to Claude.
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose", "--settings", settings(), "--name", agent_id,
+        "--verbose", "--settings", settings(), "--strict-mcp-config", *mcp_arguments(), "--name", agent_id,
         *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
     dropped = [name for name in secret_names if name not in environment]
@@ -414,6 +425,34 @@ def start(
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
     send(input_path, prompt)
     return session
+
+
+def mcp_arguments() -> list[str]:
+    """The arguments that give an agent main's MCP servers. Raises ValueError if main's .mcp.json isn't valid JSON."""
+    if not MCP_JSON.exists():
+        return []
+    servers = json.loads(MCP_JSON.read_text()).get("mcpServers", {})
+    for server in servers.values():
+        # Claude Code runs a local server's command and a remote server's headersHelper, which prints its request headers.
+        if "command" in server:
+            command = started_in_main([server["command"], *server.get("args", [])])
+            server.update(command=command[0], args=command[1:])
+        if "headersHelper" in server:
+            server["headersHelper"] = shlex.join(started_in_main(["/bin/sh", "-c", server["headersHelper"]]))
+    return ["--mcp-config", json.dumps({"mcpServers": servers})]
+
+
+def started_in_main(command: list[str]) -> list[str]:
+    return ["/bin/sh", "-c", SERVER_START, "sh", str(ROOT), *command]
+
+
+def mcp_json_refusal() -> str:
+    """Why no agent can start, if main's .mcp.json isn't valid JSON. Otherwise an empty string."""
+    try:
+        mcp_arguments()
+    except ValueError as error:
+        return f"No agent can start, because {MCP_JSON} isn't valid JSON: {error}. Ask the maintainer to fix that file."
+    return ""
 
 
 def send(input_path: Path, text: str) -> None:
@@ -436,6 +475,9 @@ def handle(session: Session, line: bytes) -> None:
         session.note = None
     if event.get("type") == "rate_limit_event":
         usage.record_claude_event(session.account, event)
+    elif event.get("subtype") == "background_tasks_changed":
+        # Claude Code marks the tasks it starts itself as ambient, and some of them never end.
+        session.background_tasks = len([task for task in event.get("tasks") or [] if not task.get("ambient")])
     elif event.get("type") == "result":
         # A session can give several results, such as after a background command finishes. The last one counts.
         session.report = event.get("result", "")
@@ -443,14 +485,11 @@ def handle(session: Session, line: bytes) -> None:
         usage.record_context_windows(session.account, event.get("modelUsage") or {})
 
 
-def runs_background_commands(process: subprocess.Popen) -> bool:
-    children = subprocess.run(["pgrep", "-P", str(process.pid)], capture_output=True, text=True, check=False)
-    return bool(children.stdout.strip())
-
-
 def is_done(session: Session) -> bool:
     quiet = time.time() - session.last_output > QUIET_SECONDS
-    return session.reported and quiet and not runs_background_commands(session.process)
+    # The agent's child processes don't count, because its MCP servers stay child processes for as long as the agent
+    # runs.
+    return session.reported and quiet and not session.background_tasks
 
 
 def wait(session: Session, record: dict) -> str:
