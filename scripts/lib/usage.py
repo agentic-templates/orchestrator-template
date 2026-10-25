@@ -424,7 +424,7 @@ def started_at(pid: int) -> str:
 
 
 def command_line(pid: int) -> list[str]:
-    """The process's command line as a list of arguments, or an empty list if it has ended or, on macOS, belongs to
+    """The program and arguments that started the process, or an empty list if it has ended or, on macOS, belongs to
     another user."""
     if sys.platform == "linux":
         try:
@@ -432,7 +432,8 @@ def command_line(pid: int) -> list[str]:
         except (FileNotFoundError, ProcessLookupError):
             return []
     else:
-        # sysctl returns the number of arguments, the program's path, padding, then the arguments, each ended by a zero byte.
+        # sysctl returns how many items the command line has, the program's full path, padding, then the command line,
+        # each item ended by a zero byte.
         reply = sysctl(KERN_PROCARGS2, pid)
         count = int.from_bytes(reply[:4], sys.byteorder)
         after_path = reply[4:].partition(b"\0")[2]
