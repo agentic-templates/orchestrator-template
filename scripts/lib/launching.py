@@ -6,6 +6,7 @@ import json
 import os
 import re
 import select
+import shlex
 import signal
 import stat
 import subprocess
@@ -23,8 +24,8 @@ import usage
 
 ROOT = usage.ROOT
 WORKTREES = usage.LOOP / "worktrees"
-# Agents' own uv cache and tools. The scripts and hooks that run outside the sandbox use the default cache and Python, which
-# agents may only read, so that nothing an agent writes runs outside the sandbox.
+# Agents' own uv cache and tools. The scripts, hooks and MCP servers that run outside the sandbox use the default cache
+# and Python, which agents may only read, so that nothing an agent writes runs outside the sandbox.
 UV_CACHE = usage.LOOP / "agent-uv-cache"
 # Places in the home folder that commonly hold secrets, which agents mustn't read. Claude Code's sandbox lets every
 # command reach the keychain's services, so only denying Library/Keychains keeps commands from reading the logins in
@@ -54,8 +55,8 @@ SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 QUIET_SECONDS = 60
 # Main's copy, so that a branch can't add a server.
 MCP_SERVERS = ROOT / ".mcp.json"
-# A local MCP server runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the agents'
-# uv cache, where nothing an agent writes can change what it runs.
+# An MCP server's command runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the
+# agents' uv cache. Nothing an agent writes can change what runs there.
 SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
 
 
@@ -408,8 +409,8 @@ def start(
     }
     resumes = bool(usage.transcript(account.name, session_id))
     # A headless session starts every MCP server it finds without asking. --strict-mcp-config limits agents to main's
-    # servers, leaving out the account's own servers and its claude.ai connectors, through which a prompt injection
-    # could reach the services the maintainer connected to Claude.
+    # servers. It leaves out the account's own servers and claude.ai connectors, because through them a prompt
+    # injection could reach the services the maintainer connected to Claude.
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
         "--verbose", "--settings", settings(), "--strict-mcp-config", *mcp_servers(), "--name", agent_id,
@@ -427,20 +428,34 @@ def start(
 
 
 def mcp_servers() -> list[str]:
-    """The --mcp-config argument with main's MCP servers, each local one started by SERVER_START, or nothing if main
-    has no .mcp.json."""
+    """Raises ValueError if main's .mcp.json isn't valid JSON."""
     if not MCP_SERVERS.exists():
         return []
-    try:
-        servers = json.loads(MCP_SERVERS.read_text()).get("mcpServers", {})
-    except json.JSONDecodeError as error:
-        raise SystemExit(f"Main's .mcp.json isn't valid JSON: {error}. Fix it on main, then launch again.") from None
+    servers = json.loads(MCP_SERVERS.read_text()).get("mcpServers", {})
     for server in servers.values():
-        # A remote server has a url instead of a command.
+        # Claude Code runs a local server's command, and a remote server's headersHelper to get its request headers.
         if "command" in server:
-            command = [server["command"], *server.get("args", [])]
-            server.update(command="/bin/sh", args=["-c", SERVER_START, "sh", str(ROOT), *command])
+            command = started_in_main([server["command"], *server.get("args", [])])
+            server.update(command=command[0], args=command[1:])
+        if "headersHelper" in server:
+            server["headersHelper"] = shlex.join(started_in_main(["/bin/sh", "-c", server["headersHelper"]]))
     return ["--mcp-config", json.dumps({"mcpServers": servers})]
+
+
+def started_in_main(command: list[str]) -> list[str]:
+    return ["/bin/sh", "-c", SERVER_START, "sh", str(ROOT), *command]
+
+
+def mcp_servers_refusal() -> str:
+    """Why no agent can start, if main's .mcp.json isn't valid JSON. Otherwise an empty string."""
+    try:
+        mcp_servers()
+    except ValueError as error:
+        return (
+            f"No agent can start, because .mcp.json in the main checkout isn't valid JSON: {error}. Ask the "
+            "maintainer to fix it."
+        )
+    return ""
 
 
 def send(input_path: Path, text: str) -> None:
@@ -475,7 +490,8 @@ def handle(session: Session, line: bytes) -> None:
 
 def is_done(session: Session) -> bool:
     quiet = time.time() - session.last_output > QUIET_SECONDS
-    # Not the agent's child processes, because its MCP servers stay child processes for as long as the agent runs.
+    # The agent's child processes don't count, because its MCP servers stay child processes for as long as the agent
+    # runs.
     return session.reported and quiet and not session.background_tasks
 
 

@@ -278,26 +278,44 @@ class McpServersTest(unittest.TestCase):
         self.assertEqual(argument[0], "--mcp-config")
         return json.loads(argument[1])["mcpServers"]
 
+    def run_as_an_agent(self, command: list[str] | str) -> list[str]:
+        """The lines a command prints when it runs in an agent's worktree, with the agents' uv cache."""
+        environment = {**os.environ, "UV_CACHE_DIR": str(self.folder / "agent-uv-cache")}
+        output = subprocess.run(
+            command,
+            cwd=self.folder,
+            env=environment,
+            shell=isinstance(command, str),
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        return output.splitlines()
+
     def test_a_local_server_runs_in_the_main_checkout_without_the_agents_uv_cache(self):
         server = self.servers({"local": {"command": "/bin/sh", "args": ["-c", "pwd; echo ${UV_CACHE_DIR-unset}"]}})
-        environment = {**os.environ, "UV_CACHE_DIR": str(self.folder / "agent-uv-cache")}
-        command = [server["local"]["command"], *server["local"]["args"]]
-        output = subprocess.run(
-            command, cwd=self.folder, env=environment, capture_output=True, text=True, check=True
-        ).stdout
-        self.assertEqual(output.splitlines(), [os.path.realpath(launching.ROOT), "unset"])
+        lines = self.run_as_an_agent([server["local"]["command"], *server["local"]["args"]])
+        self.assertEqual(lines, [os.path.realpath(launching.ROOT), "unset"])
 
-    def test_a_remote_server_is_passed_as_it_is(self):
+    def test_a_remote_servers_headers_helper_runs_in_the_main_checkout_without_the_agents_uv_cache(self):
+        helper = 'pwd; echo ${UV_CACHE_DIR-unset}; echo \'{"X-Token": "a b"}\''
+        server = self.servers(
+            {"remote": {"type": "http", "url": "https://mcp.example.com/mcp", "headersHelper": helper}}
+        )
+        lines = self.run_as_an_agent(server["remote"]["headersHelper"])
+        self.assertEqual(lines, [os.path.realpath(launching.ROOT), "unset", '{"X-Token": "a b"}'])
+
+    def test_a_remote_server_without_a_headers_helper_is_passed_as_it_is(self):
         remote = {"type": "http", "url": "https://mcp.example.com/mcp"}
         self.assertEqual(self.servers({"remote": remote}), {"remote": remote})
 
     def test_without_an_mcp_json_there_is_no_server(self):
         self.assertEqual(launching.mcp_servers(), [])
 
-    def test_an_mcp_json_that_isnt_json_stops_the_launch(self):
+    def test_launches_are_refused_while_the_mcp_json_isnt_json(self):
+        self.assertEqual(launching.mcp_servers_refusal(), "")
         self.path.write_text("{")
-        with self.assertRaises(SystemExit):
-            launching.mcp_servers()
+        self.assertIn("No agent can start", launching.mcp_servers_refusal())
 
 
 class PathRefusalTest(unittest.TestCase):
