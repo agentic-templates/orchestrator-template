@@ -38,7 +38,7 @@ class RunsElsewhereTest(unittest.TestCase):
         self.assertTrue(usage.runs_elsewhere(os.getpid(), usage.started_at(os.getpid()), mine=1))
 
     def test_a_later_process_with_the_same_id_isnt_the_orchestrator(self):
-        self.assertFalse(usage.runs_elsewhere(os.getpid(), "Mon Oct 20 09:00:00 2026", mine=1))
+        self.assertFalse(usage.runs_elsewhere(os.getpid(), "1792000000.000000", mine=1))
 
     def test_the_recorded_orchestrator_is_this_session(self):
         self.assertFalse(usage.runs_elsewhere(os.getpid(), usage.started_at(os.getpid()), mine=os.getpid()))
@@ -63,6 +63,15 @@ class IsRunningTest(unittest.TestCase):
         self.addCleanup(started.wait)
         self.addCleanup(started.kill)
         self.assertTrue(usage.is_running(started.pid, "sleep"))
+
+    def test_reads_a_process_when_ps_cant_start(self):
+        started = subprocess.Popen(["/bin/sleep", "30"])
+        self.addCleanup(started.wait)
+        self.addCleanup(started.kill)
+        # Without a PATH, ps can't start, as in the agents' sandbox.
+        with mock.patch.dict(os.environ, {"PATH": ""}):
+            self.assertTrue(usage.is_running(started.pid, "sleep"))
+            self.assertTrue(usage.started_at(started.pid))
 
 
 class ReserveTest(unittest.TestCase):
