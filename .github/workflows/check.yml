@@ -3,12 +3,20 @@ name: check
 on:
   pull_request:
   merge_group:
+  # CI checks every file on main, because a change, such as a new linter rule, can break files it didn't touch. The
+  # daily run also catches a failure that appears without a commit, such as a test that depends on the date.
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * *"
 
 permissions: {}
 
+# On main, a newer push doesn't cancel a run that has started, and GitHub cancels every waiting run but the newest, so
+# the latest commit is always checked.
 concurrency:
   group: check-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The ruleset that scripts/configure-github sets requires a job named "check". In the merge queue it checks
@@ -16,7 +24,9 @@ jobs:
   # break main together.
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # A job that runs out of time ends as cancelled, which the watcher can't tell from a run that a newer push
+    # replaced, so the checks have their own, shorter limit, and fail when they reach it.
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -30,9 +40,16 @@ jobs:
           version: "0.13.0"
 
       - name: Check the changed files
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        timeout-minutes: 5
         run: scripts/check --base "$BASE"
+
+      - name: Check every file
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        timeout-minutes: 5
+        run: scripts/check --all
 
       - name: Check new dependencies for known vulnerabilities
         if: github.event_name == 'pull_request'

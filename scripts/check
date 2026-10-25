@@ -105,7 +105,7 @@ def run_tools(paths: list[str], tools: list = TOOLS, tests: list = TESTS) -> boo
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--all", action="store_true", help="check every file, as CI does in the merge queue")
+    parser.add_argument("--all", action="store_true", help="check every file")
     parser.add_argument("--base", help="count the changes from this commit")
     parser.add_argument("--review", action="store_true", help="list what a reviewer should judge, without failing")
     arguments = parser.parse_args()
