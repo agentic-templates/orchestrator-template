@@ -55,24 +55,24 @@ class Simulation:
             runs = tuple((agent.started, agent.stopped) for agent in self.agents + self.finished)
             load = meter.Load(len(running), REACTION, 1.0, runs, measured_since_last_start=measured)
             decision = meter.decide({"5h": self.readings}, now, load)
-            if self.is_settled(decision):
+            if self.can_stop_early(decision):
                 break
             self.act(decision, now)
             self.work(now)
         return self
 
-    def is_settled(self, decision: meter.Decision) -> bool:
-        """Whether the rest of the window can't change what the tests check. With no agent running, the use stays
-        where it is. Once the last agent stopped longer ago than the meter's longest span of readings, every later
-        reading is the same, so every later decision is this one. Ending here keeps the simulations' CPU low: most
-        of it went to the minutes after the agents stopped."""
+    def can_stop_early(self, decision: meter.Decision) -> bool:
+        """True when the rest of the window can't change what the tests check. With no agent running, the usage stays
+        where it is. Once the last agent stopped at least the meter's longest span of readings ago, every later
+        reading is the same, so every later decision repeats this one, unless this one starts an agent. Simulating
+        those minutes took 3.4 s of CPU."""
         if self.agents or self.readings_stop_at is not None:
             return False
         if self.issues == 0:
             return True
         last_stop = max((agent.stopped for agent in self.finished), default=-math.inf)
-        quiet = self.readings[-1].time - last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
-        return quiet and decision.action != "start"
+        is_past_longest_span = self.readings[-1].time - last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
+        return is_past_longest_span and decision.action != "start"
 
     def read(self, minute: int, now: float) -> None:
         fresh = self.readings_stop_at is None or minute < self.readings_stop_at
