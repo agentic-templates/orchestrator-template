@@ -63,12 +63,10 @@ class Simulation:
         return self
 
     def can_stop_early(self, decision: meter.Decision) -> bool:
-        """True when the rest of the window can't change what the tests check. If readings stop coming, the meter's
-        decisions keep changing as the last reading ages, so the simulation never stops early then. With no agent
-        running and no issue left to start, the usage stays where it is. Once the last agent has stopped at least the
-        longest burn span ago, every burn span holds the same readings, so every later decision repeats this one. The
-        exception is a decision that starts an agent. Without the early stop, the meter's tests spend 3.4 s of CPU on
-        these minutes."""
+        """True when the rest of the window can't change what the tests check. Once no agent has run for the longest
+        burn span, the readings stop changing, so the meter repeats its decision. Stopping there saves the meter's
+        tests 3.4 s of CPU."""
+        # Readings that stop coming age, and the meter's decisions change as they do.
         if self.agents or self.readings_stop_at is not None:
             return False
         if self.issues == 0:
