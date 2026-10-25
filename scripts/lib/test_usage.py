@@ -55,19 +55,25 @@ class RunsElsewhereTest(unittest.TestCase):
 
 
 class IsRunningTest(unittest.TestCase):
+    def sleeping(self) -> subprocess.Popen:
+        """A process of /bin/sleep, once it has started. For a moment after it starts, Linux shows its command line
+        as empty."""
+        started = subprocess.Popen(["/bin/sleep", "30"])
+        self.addCleanup(started.wait)
+        self.addCleanup(started.kill)
+        deadline = time.time() + 5
+        while not usage.arguments(started.pid) and time.time() < deadline:
+            time.sleep(0.01)
+        return started
+
     def test_a_live_process_of_another_program(self):
         self.assertFalse(usage.is_running(os.getpid(), "launch"))
 
     def test_the_program_counts_whatever_path_started_it(self):
-        started = subprocess.Popen(["/bin/sleep", "30"])
-        self.addCleanup(started.wait)
-        self.addCleanup(started.kill)
-        self.assertTrue(usage.is_running(started.pid, "sleep"))
+        self.assertTrue(usage.is_running(self.sleeping().pid, "sleep"))
 
     def test_reads_a_process_when_ps_cant_start(self):
-        started = subprocess.Popen(["/bin/sleep", "30"])
-        self.addCleanup(started.wait)
-        self.addCleanup(started.kill)
+        started = self.sleeping()
         # Without a PATH, ps can't start, as in the agents' sandbox.
         with mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertTrue(usage.is_running(started.pid, "sleep"))
