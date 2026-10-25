@@ -34,7 +34,7 @@ class Simulation:
     reading_every: int = 1
     max_agents: int = 20
     readings_stop_at: int | None = None
-    stops_early: bool = True
+    may_stop_early: bool = True
     used: float = 0.0
     agents: list[Agent] = field(default_factory=list)
     finished: list[Agent] = field(default_factory=list)
@@ -56,18 +56,19 @@ class Simulation:
             runs = tuple((agent.started, agent.stopped) for agent in self.agents + self.finished)
             load = meter.Load(len(running), REACTION, 1.0, runs, measured_since_last_start=measured)
             decision = meter.decide({"5h": self.readings}, now, load)
-            if self.stops_early and self.can_stop_early(decision):
+            if self.may_stop_early and self.can_stop_early(decision):
                 break
             self.act(decision, now)
             self.work(now)
         return self
 
     def can_stop_early(self, decision: meter.Decision) -> bool:
-        """True when the rest of the window can't change what the tests check. With no agent running, the usage stays
-        where it is. Once the last agent stopped at least the meter's longest burn span ago, the readings in every
-        burn span are the same, so every later decision repeats this one, unless this one starts an agent. Readings
-        that stop coming change the decisions as they age. Without the early stop, the meter's tests spend 3.4 s of
-        CPU on these minutes."""
+        """True when the rest of the window can't change what the tests check. If readings stop coming, the meter's
+        decisions keep changing as the last reading ages, so the simulation never stops early then. With no agent
+        running and no issue left to start, the usage stays where it is. Once the last agent has stopped at least the
+        longest burn span ago, every burn span holds the same readings, so every later decision repeats this one. The
+        exception is a decision that starts an agent. Without the early stop, the meter's tests spend 3.4 s of CPU on
+        these minutes."""
         if self.agents or self.readings_stop_at is not None:
             return False
         if self.issues == 0:
@@ -107,11 +108,12 @@ class Simulation:
 
 class WindDownTest(unittest.TestCase):
     def test_stopping_early_gives_the_results_of_the_whole_window(self):
-        # With 5 issues the simulation runs out of issues; with 500 the meter holds the agents at the limit.
+        # With 5 issues the simulation runs out of issues. With 500 it never does, so the usage limit decides when
+        # agents stop.
         for issues in (5, 500):
             early = Simulation(agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5).run()
             whole = Simulation(
-                agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5, stops_early=False
+                agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5, may_stop_early=False
             ).run()
             with self.subTest(issues=issues):
                 self.assertEqual(

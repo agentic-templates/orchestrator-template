@@ -339,8 +339,8 @@ class NestedRepositoryTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Building these repositories with git for each test cost 1.9 s of CPU in all. Git writes absolute paths into
-        # them, so setUp copies them back to the path where they were built.
+        # Building these repositories with git takes 1.9 s of CPU across the five tests, so they're built once. Git
+        # writes absolute paths into them, so setUp copies them to the path where they were built.
         folder = tempfile.TemporaryDirectory()
         cls.addClassCleanup(folder.cleanup)
         cls.root = Path(folder.name) / "root"
