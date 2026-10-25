@@ -53,8 +53,8 @@ HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
 SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
-# Main's copy, so that a branch can't add a server.
-MCP_SERVERS = ROOT / ".mcp.json"
+# The main checkout's, so that a branch can't add a server.
+MCP_JSON = ROOT / ".mcp.json"
 # An MCP server's command runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the
 # agents' uv cache. Nothing an agent writes can change what runs there.
 SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
@@ -73,7 +73,7 @@ class Session:
     last_output: float = field(default_factory=time.time)
     # The issue's hand-off note, deleted once the agent gives a real answer.
     note: Path | None = None
-    # The background commands and subagents that the session last reported as running.
+    # How many background tasks, which are commands and subagents, the session last reported as running.
     background_tasks: int = 0
 
 
@@ -413,7 +413,7 @@ def start(
     # injection could reach the services the maintainer connected to Claude.
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose", "--settings", settings(), "--strict-mcp-config", *mcp_servers(), "--name", agent_id,
+        "--verbose", "--settings", settings(), "--strict-mcp-config", *mcp_arguments(), "--name", agent_id,
         *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
     dropped = [name for name in secret_names if name not in environment]
@@ -427,11 +427,11 @@ def start(
     return session
 
 
-def mcp_servers() -> list[str]:
-    """Raises ValueError if main's .mcp.json isn't valid JSON."""
-    if not MCP_SERVERS.exists():
+def mcp_arguments() -> list[str]:
+    """The arguments that give an agent main's MCP servers. Raises ValueError if main's .mcp.json isn't valid JSON."""
+    if not MCP_JSON.exists():
         return []
-    servers = json.loads(MCP_SERVERS.read_text()).get("mcpServers", {})
+    servers = json.loads(MCP_JSON.read_text()).get("mcpServers", {})
     for server in servers.values():
         # Claude Code runs a local server's command, and a remote server's headersHelper to get its request headers.
         if "command" in server:
@@ -446,10 +446,10 @@ def started_in_main(command: list[str]) -> list[str]:
     return ["/bin/sh", "-c", SERVER_START, "sh", str(ROOT), *command]
 
 
-def mcp_servers_refusal() -> str:
+def mcp_json_refusal() -> str:
     """Why no agent can start, if main's .mcp.json isn't valid JSON. Otherwise an empty string."""
     try:
-        mcp_servers()
+        mcp_arguments()
     except ValueError as error:
         return (
             f"No agent can start, because .mcp.json in the main checkout isn't valid JSON: {error}. Ask the "

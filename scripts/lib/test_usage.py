@@ -121,7 +121,7 @@ class CommandForTest(unittest.TestCase):
 
 
 class ProbeTest(unittest.TestCase):
-    def test_the_probe_starts_no_mcp_server(self):
+    def test_the_probe_passes_strict_mcp_config(self):
         self.assertIn("--strict-mcp-config", usage.PROBE)
 
 

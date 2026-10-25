@@ -244,13 +244,13 @@ class StartTest(unittest.TestCase):
         path = self.folder / "main" / ".mcp.json"
         path.parent.mkdir()
         path.write_text(json.dumps({"mcpServers": {"blender": {"command": "uvx", "args": ["blender-mcp"]}}}))
-        with mock.patch.object(launching, "MCP_SERVERS", path):
+        with mock.patch.object(launching, "MCP_JSON", path):
             _, _, command = self.start(resumes=False)
         self.assertIn("--strict-mcp-config", command)
         self.assertEqual(list(json.loads(command[command.index("--mcp-config") + 1])["mcpServers"]), ["blender"])
 
     def test_without_an_mcp_json_an_agent_starts_no_mcp_server(self):
-        with mock.patch.object(launching, "MCP_SERVERS", self.folder / "main" / ".mcp.json"):
+        with mock.patch.object(launching, "MCP_JSON", self.folder / "main" / ".mcp.json"):
             _, _, command = self.start(resumes=False)
         self.assertIn("--strict-mcp-config", command)
         self.assertNotIn("--mcp-config", command)
@@ -267,14 +267,14 @@ class McpServersTest(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.folder = Path(folder.name)
         self.path = self.folder / ".mcp.json"
-        patch = mock.patch.object(launching, "MCP_SERVERS", self.path)
+        patch = mock.patch.object(launching, "MCP_JSON", self.path)
         patch.start()
         self.addCleanup(patch.stop)
 
     def servers(self, servers: dict) -> dict:
         """The MCP servers an agent gets when main's .mcp.json has these."""
         self.path.write_text(json.dumps({"mcpServers": servers}))
-        argument = launching.mcp_servers()
+        argument = launching.mcp_arguments()
         self.assertEqual(argument[0], "--mcp-config")
         return json.loads(argument[1])["mcpServers"]
 
@@ -310,12 +310,12 @@ class McpServersTest(unittest.TestCase):
         self.assertEqual(self.servers({"remote": remote}), {"remote": remote})
 
     def test_without_an_mcp_json_there_is_no_server(self):
-        self.assertEqual(launching.mcp_servers(), [])
+        self.assertEqual(launching.mcp_arguments(), [])
 
     def test_launches_are_refused_while_the_mcp_json_isnt_json(self):
-        self.assertEqual(launching.mcp_servers_refusal(), "")
+        self.assertEqual(launching.mcp_json_refusal(), "")
         self.path.write_text("{")
-        self.assertIn("No agent can start", launching.mcp_servers_refusal())
+        self.assertIn("No agent can start", launching.mcp_json_refusal())
 
 
 class PathRefusalTest(unittest.TestCase):
@@ -602,7 +602,7 @@ class IsDoneTest(unittest.TestCase):
         self.go_quiet()
         self.assertTrue(launching.is_done(self.session))
 
-    def test_an_agent_is_done_only_once_its_background_commands_end(self):
+    def test_an_agent_is_done_only_once_its_background_tasks_end(self):
         tasks = {"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "b1"}]}
         launching.handle(self.session, json.dumps(tasks).encode())
         self.go_quiet()
