@@ -13,6 +13,7 @@ The orchestrator runs it in the background, and its exit wakes the orchestrator.
   session nears its context limit
 - retries a refresh that hasn't happened, once, and has the orchestrator tell the maintainer if the retry fails too
 - reports pull requests that merged, opened or failed their checks, and agents that have done nothing for a while
+- reports when main's checks start to fail
 - ends agents whose launcher has exited, such as after a crash
 
 It also exits 50 minutes after the orchestrator's last turn, so that its prompt cache, which lasts an hour, stays
@@ -37,6 +38,7 @@ def check(state: dict) -> list[str]:
     events += watching.check_contexts()
     events += watching.check_refresh(state)
     events += watching.check_pull_requests(state)
+    events += watching.check_main(state)
     events += watching.check_stalled(state)
     return events
 

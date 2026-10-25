@@ -27,6 +27,12 @@ STALLED_MINUTES = 30
 WARM_WAKE_SECONDS = 50 * 60
 # Without a limit, gh lists only 30 pull requests, and the ones it leaves out would count as merged.
 PULL_REQUEST_LIMIT = 1000
+# The watcher searches this many of main's latest runs of the checks for the last one that passed.
+MAIN_RUN_LIMIT = 20
+# GitHub cancels a waiting run when a newer one replaces it, so a cancelled run neither passed nor failed.
+FAILED_CONCLUSIONS = {"failure", "startup_failure"}
+# A pull request from a fork's branch named main also lists as a run on main, so only these events count.
+MAIN_EVENTS = {"push", "schedule"}
 CLAUDE_WRITE_TO_READ = 31.0  # zzz's measurement on a Claude subscription
 # On the API, a Haiku request whose prompt is over this many tokens costs this many times more.
 PRICE_STEPS = {"claude-haiku": (100_000, 5.0)}
@@ -52,6 +58,11 @@ REFRESH_NOW = (
 GITHUB_FAILED = (
     "GitHub failed for the watcher: {error}. It keeps trying every minute, and reports pull requests again once "
     "GitHub answers."
+)
+MAIN_GITHUB_FAILED = "GitHub failed when the watcher read main's checks: {error}. It keeps trying every minute."
+MAIN_FAILED = (
+    "Main's checks failed at commit {failed} ({url}). {since} Open a bug issue for what broke them, unless an open "
+    "issue covers it."
 )
 REFRESH_FAILED = (
     "The refresh failed twice. Send the maintainer a notification that asks them to type /clear in this session and "
@@ -195,6 +206,35 @@ def check_pull_requests(state: dict) -> list[str]:
     events += [f"#{number} opened." for number in current if number not in before]
     events += [f"#{number}'s checks failed." for number, s in current.items() if s == "failing" != before.get(number)]
     return events
+
+
+def check_main(state: dict) -> list[str]:
+    """Reports main's checks once when they start to fail."""
+    try:
+        listed = github.gh_json(
+            "run", "list", "--workflow", "check.yml", "--branch", "main", "--limit", str(MAIN_RUN_LIMIT),
+            "--json", "conclusion,event,headSha,url",
+        )  # fmt: skip
+    except SystemExit as failure:
+        if state.get("main_github_failing"):
+            return []
+        state["main_github_failing"] = True
+        return [MAIN_GITHUB_FAILED.format(error=failure)]
+    state.pop("main_github_failing", None)
+    finished = [
+        run
+        for run in listed or []
+        if run["event"] in MAIN_EVENTS and run["conclusion"] in {"success", *FAILED_CONCLUSIONS}
+    ]
+    if not finished:
+        return []
+    was_failing = state.get("main_failing", False)
+    state["main_failing"] = finished[0]["conclusion"] != "success"
+    if not state["main_failing"] or was_failing:
+        return []
+    passed = next((run["headSha"][:7] for run in finished if run["conclusion"] == "success"), None)
+    since = f"They last passed at commit {passed}." if passed else "None of their recent runs passed."
+    return [MAIN_FAILED.format(failed=finished[0]["headSha"][:7], url=finished[0]["url"], since=since)]
 
 
 def checks_state(pr: dict) -> str:

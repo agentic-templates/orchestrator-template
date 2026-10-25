@@ -110,6 +110,65 @@ class CheckPullRequestsTest(unittest.TestCase):
             self.assertEqual(len(watching.check_pull_requests(state)), 1)
 
 
+class CheckMainTest(unittest.TestCase):
+    """A stand-in for GitHub lists main's runs of the checks, newest first, with the conclusions given."""
+
+    def check(self, state: dict, *conclusions: str, event: str = "push") -> list[str]:
+        runs = [
+            {
+                "conclusion": conclusion,
+                "event": event,
+                "headSha": f"{number}abcdef0123",
+                "url": f"https://runs/{number}",
+            }
+            for number, conclusion in enumerate(conclusions, 1)
+        ]
+        with mock.patch.object(watching.github, "gh_json", lambda *args: runs):
+            return watching.check_main(state)
+
+    def test_failing_checks_are_reported_with_the_last_commit_that_passed(self):
+        events = self.check({}, "failure", "cancelled", "failure", "success")
+        self.assertEqual(len(events), 1)
+        self.assertIn("1abcdef", events[0])
+        self.assertIn("https://runs/1", events[0])
+        self.assertIn("4abcdef", events[0])
+
+    def test_checks_that_never_passed_are_reported_without_a_commit_that_passed(self):
+        events = self.check({}, "failure", event="schedule")
+        self.assertEqual(len(events), 1)
+        self.assertIn("1abcdef", events[0])
+        self.assertIn("None of their recent runs passed.", events[0])
+
+    def test_checks_that_still_fail_arent_reported_again(self):
+        state = {}
+        self.check(state, "failure", "success")
+        self.assertEqual(self.check(state, "failure", "failure", "success"), [])
+
+    def test_checks_that_fail_again_after_passing_are_reported(self):
+        state = {}
+        self.check(state, "failure", "success")
+        self.check(state, "success", "failure", "success")
+        self.assertEqual(len(self.check(state, "failure", "success", "failure")), 1)
+
+    def test_runs_still_going_or_cancelled_dont_count(self):
+        self.assertEqual(self.check({}, "", "cancelled", "success", "failure"), [])
+
+    def test_a_pull_request_from_a_forks_main_branch_doesnt_count(self):
+        self.assertEqual(self.check({}, "failure", event="pull_request"), [])
+
+    def test_a_github_failure_is_reported_once(self):
+        state = {}
+
+        def failing(*args: str) -> None:
+            raise SystemExit("gh run list failed: HTTP 403")
+
+        with mock.patch.object(watching.github, "gh_json", failing):
+            events = watching.check_main(state)
+            self.assertEqual(len(events), 1)
+            self.assertIn("HTTP 403", events[0])
+            self.assertEqual(watching.check_main(state), [])
+
+
 class CheckContextsTest(TempLoopTest):
     def orchestrate(self, transcript_text: str) -> None:
         transcript = self.root / "orchestrator.jsonl"
