@@ -62,7 +62,7 @@ class IsRunningTest(unittest.TestCase):
         self.addCleanup(started.kill)
         # Linux shows an empty command line for a moment while a process starts.
         deadline = time.time() + 5
-        while not usage.arguments(started.pid) and time.time() < deadline:
+        while not usage.command_line(started.pid) and time.time() < deadline:
             time.sleep(0.01)
         return started
 

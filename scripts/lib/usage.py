@@ -333,7 +333,7 @@ def pid_in(path: Path) -> int | None:
 def is_running(pid: int, name: str) -> bool:
     """Whether the process's command line has `name` as a word, such as the program "watch" whatever path started
     it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
-    words = " ".join(arguments(pid)).split()
+    words = " ".join(command_line(pid)).split()
     return name in (Path(word).name for word in words)
 
 
@@ -423,8 +423,9 @@ def started_at(pid: int) -> str:
     return f"{seconds}.{microseconds:06d}"
 
 
-def arguments(pid: int) -> list[str]:
-    """The arguments that started the process, or an empty list if it has ended or, on macOS, belongs to another user."""
+def command_line(pid: int) -> list[str]:
+    """The process's command line as a list of arguments, or an empty list if it has ended or, on macOS, belongs to
+    another user."""
     if sys.platform == "linux":
         try:
             raw = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:-1]
@@ -432,9 +433,9 @@ def arguments(pid: int) -> list[str]:
             return []
     else:
         # sysctl returns the number of arguments, the program's path, padding, then the arguments, each ended by a zero byte.
-        command_line = sysctl(KERN_PROCARGS2, pid)
-        count = int.from_bytes(command_line[:4], sys.byteorder)
-        after_path = command_line[4:].partition(b"\0")[2]
+        reply = sysctl(KERN_PROCARGS2, pid)
+        count = int.from_bytes(reply[:4], sys.byteorder)
+        after_path = reply[4:].partition(b"\0")[2]
         raw = after_path.lstrip(b"\0").split(b"\0")[:count]
     return [argument.decode(errors="replace") for argument in raw]
 
