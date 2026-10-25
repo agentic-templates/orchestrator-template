@@ -438,7 +438,7 @@ def command_line(pid: int) -> list[str]:
         count = int.from_bytes(reply[:4], sys.byteorder)
         after_path = reply[4:].partition(b"\0")[2]
         raw = after_path.lstrip(b"\0").split(b"\0")[:count]
-    return [argument.decode(errors="replace") for argument in raw]
+    return [item.decode(errors="replace") for item in raw]
 
 
 # The macOS sysctl names that ps reads. The agents' sandbox lets agents read them but refuses to start programs that run
