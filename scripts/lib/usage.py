@@ -333,7 +333,8 @@ def pid_in(path: Path) -> int | None:
 def is_running(pid: int, name: str) -> bool:
     """Whether the process's command line has `name` as a word, such as the program "watch" whatever path started
     it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
-    return name in (Path(word).name for argument in arguments(pid) for word in argument.split())
+    words = " ".join(arguments(pid)).split()
+    return name in (Path(word).name for word in words)
 
 
 def save_agent(agent: dict) -> None:
@@ -410,7 +411,8 @@ def started_at(pid: int) -> str:
     if sys.platform == "linux":
         try:
             # The command's name, in parentheses, can hold spaces. The start time is the 20th field after it.
-            return Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[19]
+            after_name = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2]
+            return after_name.split()[19]
         except (FileNotFoundError, ProcessLookupError):
             return ""
     record = sysctl(KERN_PROC, KERN_PROC_PID, pid)
@@ -422,7 +424,7 @@ def started_at(pid: int) -> str:
 
 
 def arguments(pid: int) -> list[str]:
-    """The arguments that started the process, or an empty list if they can't be read."""
+    """The arguments that started the process, or an empty list if it has ended or, on macOS, belongs to another user."""
     if sys.platform == "linux":
         try:
             raw = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:-1]
@@ -432,7 +434,8 @@ def arguments(pid: int) -> list[str]:
         # sysctl returns the number of arguments, the program's path, padding, then the arguments, each ended by a zero byte.
         command_line = sysctl(KERN_PROCARGS2, pid)
         count = int.from_bytes(command_line[:4], sys.byteorder)
-        raw = command_line[4:].partition(b"\0")[2].lstrip(b"\0").split(b"\0")[:count]
+        after_path = command_line[4:].partition(b"\0")[2]
+        raw = after_path.lstrip(b"\0").split(b"\0")[:count]
     return [argument.decode(errors="replace") for argument in raw]
 
 
@@ -445,6 +448,7 @@ def sysctl(*name: int) -> bytes:
     libc = ctypes.CDLL(None)
     full_name = (ctypes.c_int * (len(name) + 1))(CTL_KERN, *name)
     size = ctypes.c_size_t()
+    # KERN_PROCARGS2 gives the same error, EINVAL, for an ended process and another user's, and neither is the loop's.
     if libc.sysctl(full_name, len(full_name), None, ctypes.byref(size), None, 0) != 0:
         return b""
     buffer = ctypes.create_string_buffer(size.value)

@@ -56,10 +56,11 @@ class RunsElsewhereTest(unittest.TestCase):
 
 class IsRunningTest(unittest.TestCase):
     def start_sleep_process(self) -> subprocess.Popen:
-        """Returns the process once Linux shows its command line, which is empty for a moment while the process starts."""
+        """Returns the process once its command line can be read."""
         started = subprocess.Popen(["/bin/sleep", "30"])
         self.addCleanup(started.wait)
         self.addCleanup(started.kill)
+        # Linux shows an empty command line for a moment while a process starts.
         deadline = time.time() + 5
         while not usage.arguments(started.pid) and time.time() < deadline:
             time.sleep(0.01)
@@ -73,7 +74,7 @@ class IsRunningTest(unittest.TestCase):
 
     def test_reads_the_command_line_and_start_time_when_ps_cant_start(self):
         started = self.start_sleep_process()
-        # Without a PATH, ps can't start, as in the agents' sandbox.
+        # Without a PATH, ps can't start.
         with mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertTrue(usage.is_running(started.pid, "sleep"))
             self.assertTrue(usage.started_at(started.pid))
