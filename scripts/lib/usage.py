@@ -1,12 +1,15 @@
 """The loop's accounts, their usage readings and the agents running on them, all kept in `.loop/`."""
 
 import contextlib
+import ctypes
 import json
 import os
 import select
 import shutil
 import signal
+import struct
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -330,8 +333,8 @@ def pid_in(path: Path) -> int | None:
 def is_running(pid: int, name: str) -> bool:
     """Whether the process's command line has `name` as a word, such as the program "watch" whatever path started
     it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
-    command = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True, check=False)
-    return name in (Path(word).name for word in command.stdout.split())
+    words = " ".join(command_line(pid)).split()
+    return name in (Path(word).name for word in words)
 
 
 def save_agent(agent: dict) -> None:
@@ -403,9 +406,57 @@ def runs_elsewhere(recorded: int | None, started: str | None, mine: int | None) 
 
 
 def started_at(pid: int) -> str:
-    """When the process started, or nothing if no process has the ID."""
-    command = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, check=False)
-    return command.stdout.strip()
+    """The process's start time, only to compare with another value from this function, or an empty string if no
+    process has the ID."""
+    if sys.platform == "linux":
+        try:
+            # The command's name, in parentheses, can hold spaces. The start time is the 20th field after it.
+            after_name = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2]
+            return after_name.split()[19]
+        except (FileNotFoundError, ProcessLookupError):
+            return ""
+    record = sysctl(KERN_PROC, KERN_PROC_PID, pid)
+    if not record:
+        return ""
+    # The process record starts with the start time, in seconds and microseconds.
+    seconds, microseconds = struct.unpack_from("qi", record)
+    return f"{seconds}.{microseconds:06d}"
+
+
+def command_line(pid: int) -> list[str]:
+    """The program and arguments that started the process, or an empty list if it has ended or, on macOS, belongs to
+    another user."""
+    if sys.platform == "linux":
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[:-1]
+        except (FileNotFoundError, ProcessLookupError):
+            return []
+    else:
+        # sysctl returns how many items the command line has, the program's full path, padding, then the command line,
+        # each item ended by a zero byte.
+        reply = sysctl(KERN_PROCARGS2, pid)
+        count = int.from_bytes(reply[:4], sys.byteorder)
+        after_path = reply[4:].partition(b"\0")[2]
+        raw = after_path.lstrip(b"\0").split(b"\0")[:count]
+    return [item.decode(errors="replace") for item in raw]
+
+
+# The macOS sysctl names that ps reads. The agents' sandbox lets agents read them but refuses to start programs that run
+# as root, such as ps.
+CTL_KERN, KERN_PROC, KERN_PROC_PID, KERN_PROCARGS2 = 1, 14, 1, 49
+
+
+def sysctl(*name: int) -> bytes:
+    libc = ctypes.CDLL(None)
+    full_name = (ctypes.c_int * (len(name) + 1))(CTL_KERN, *name)
+    size = ctypes.c_size_t()
+    # KERN_PROCARGS2 gives the same error, EINVAL, for an ended process and another user's, and neither is the loop's.
+    if libc.sysctl(full_name, len(full_name), None, ctypes.byref(size), None, 0) != 0:
+        return b""
+    buffer = ctypes.create_string_buffer(size.value)
+    if libc.sysctl(full_name, len(full_name), buffer, ctypes.byref(size), None, 0) != 0:
+        return b""
+    return buffer.raw[: size.value]
 
 
 def minutes_since_maintainer_wrote() -> float:

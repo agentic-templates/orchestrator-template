@@ -38,7 +38,7 @@ class RunsElsewhereTest(unittest.TestCase):
         self.assertTrue(usage.runs_elsewhere(os.getpid(), usage.started_at(os.getpid()), mine=1))
 
     def test_a_later_process_with_the_same_id_isnt_the_orchestrator(self):
-        self.assertFalse(usage.runs_elsewhere(os.getpid(), "Mon Oct 20 09:00:00 2026", mine=1))
+        self.assertFalse(usage.runs_elsewhere(os.getpid(), started="1792000000.000000", mine=1))
 
     def test_the_recorded_orchestrator_is_this_session(self):
         self.assertFalse(usage.runs_elsewhere(os.getpid(), usage.started_at(os.getpid()), mine=os.getpid()))
@@ -55,14 +55,29 @@ class RunsElsewhereTest(unittest.TestCase):
 
 
 class IsRunningTest(unittest.TestCase):
-    def test_a_live_process_of_another_program(self):
-        self.assertFalse(usage.is_running(os.getpid(), "launch"))
-
-    def test_the_program_counts_whatever_path_started_it(self):
+    def start_sleep_process(self) -> subprocess.Popen:
+        """Returns once the process's command line can be read."""
         started = subprocess.Popen(["/bin/sleep", "30"])
         self.addCleanup(started.wait)
         self.addCleanup(started.kill)
-        self.assertTrue(usage.is_running(started.pid, "sleep"))
+        # Linux shows an empty command line for a moment while a process starts.
+        deadline = time.time() + 5
+        while not usage.command_line(started.pid) and time.time() < deadline:
+            time.sleep(0.01)
+        return started
+
+    def test_a_live_process_of_another_program(self):
+        self.assertFalse(usage.is_running(os.getpid(), "launch"))
+
+    def test_a_program_started_by_its_full_path_is_running(self):
+        self.assertTrue(usage.is_running(self.start_sleep_process().pid, "sleep"))
+
+    def test_reads_the_command_line_and_start_time_when_ps_cant_start(self):
+        started = self.start_sleep_process()
+        # Without a PATH, ps can't start here, as it can't in the agents' sandbox.
+        with mock.patch.dict(os.environ, {"PATH": ""}):
+            self.assertTrue(usage.is_running(started.pid, "sleep"))
+            self.assertTrue(usage.started_at(started.pid))
 
 
 class ReserveTest(unittest.TestCase):
