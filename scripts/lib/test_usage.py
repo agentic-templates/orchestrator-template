@@ -69,7 +69,7 @@ class IsRunningTest(unittest.TestCase):
     def test_a_live_process_of_another_program(self):
         self.assertFalse(usage.is_running(os.getpid(), "launch"))
 
-    def test_the_program_counts_whatever_path_started_it(self):
+    def test_a_program_started_by_its_full_path_is_running(self):
         self.assertTrue(usage.is_running(self.sleeping().pid, "sleep"))
 
     def test_reads_a_process_when_ps_cant_start(self):
