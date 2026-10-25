@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -336,27 +337,39 @@ class NestedRepositoryTest(unittest.TestCase):
     """A builder's worktree, in which the agent made a nested repository whose config runs a program that leaves a
     marker, as an agent can from inside the sandbox."""
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
+        # Git takes most of these tests' time, so the repositories are built once, and each test gets a fresh copy of
+        # them. Git writes absolute paths into them, so each copy goes where they were built.
         folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        root = Path(folder.name)
+        cls.addClassCleanup(folder.cleanup)
+        cls.root = Path(folder.name) / "root"
+        cls.built = Path(folder.name) / "built"
+        root = cls.root
+        root.mkdir()
         run_git(root, "init", "--quiet", "--bare", "origin.git")
         run_git(root, "clone", "--quiet", str(root / "origin.git"), "main")
         for key, value in (("user.name", "Test"), ("user.email", "test@example.com"), ("commit.gpgsign", "false")):
             run_git(root / "main", "config", key, value)
         run_git(root / "main", "commit", "--quiet", "--allow-empty", "-m", "start")
         run_git(root / "main", "push", "--quiet", "origin", "HEAD:main")
-        self.main = root / "main"
-        self.worktree = root / "worktree"
-        run_git(self.main, "worktree", "add", "--quiet", "-b", "issue-1", str(self.worktree))
-        self.marker = root / "marker"
+        run_git(root / "main", "worktree", "add", "--quiet", "-b", "issue-1", str(root / "worktree"))
+        nested = root / "worktree" / "vendor" / "repo"
+        nested.mkdir(parents=True)
+        run_git(root, "init", "--quiet", "--separate-git-dir", str(root / "planted"), str(nested))
+        run_git(nested, "config", "filter.evil.clean", f"touch {root / 'marker'}; cat")
+        (nested / ".gitattributes").write_text("* filter=evil\n")
+        (nested / "file").write_text("planted\n")
+        (root / "worktree" / "new.py").write_text("print('work')\n")
+        root.rename(cls.built)
+
+    def setUp(self):
+        shutil.copytree(self.built, self.root, symlinks=True)
+        self.addCleanup(shutil.rmtree, self.root)
+        self.main = self.root / "main"
+        self.worktree = self.root / "worktree"
+        self.marker = self.root / "marker"
         self.nested = self.worktree / "vendor" / "repo"
-        self.nested.mkdir(parents=True)
-        run_git(root, "init", "--quiet", "--separate-git-dir", str(root / "planted"), str(self.nested))
-        run_git(self.nested, "config", "filter.evil.clean", f"touch {self.marker}; cat")
-        (self.nested / ".gitattributes").write_text("* filter=evil\n")
-        (self.nested / "file").write_text("planted\n")
-        (self.worktree / "new.py").write_text("print('work')\n")
 
     def committed(self) -> list[str]:
         return run_git(self.worktree, "ls-tree", "-r", "--name-only", "origin/issue-1").split()
