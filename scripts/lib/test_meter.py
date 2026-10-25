@@ -34,6 +34,7 @@ class Simulation:
     reading_every: int = 1
     max_agents: int = 20
     readings_stop_at: int | None = None
+    stops_early: bool = True
     used: float = 0.0
     agents: list[Agent] = field(default_factory=list)
     finished: list[Agent] = field(default_factory=list)
@@ -55,7 +56,7 @@ class Simulation:
             runs = tuple((agent.started, agent.stopped) for agent in self.agents + self.finished)
             load = meter.Load(len(running), REACTION, 1.0, runs, measured_since_last_start=measured)
             decision = meter.decide({"5h": self.readings}, now, load)
-            if self.can_stop_early(decision):
+            if self.stops_early and self.can_stop_early(decision):
                 break
             self.act(decision, now)
             self.work(now)
@@ -63,16 +64,17 @@ class Simulation:
 
     def can_stop_early(self, decision: meter.Decision) -> bool:
         """True when the rest of the window can't change what the tests check. With no agent running, the usage stays
-        where it is. Once the last agent stopped at least the meter's longest span of readings ago, every later
-        reading is the same, so every later decision repeats this one, unless this one starts an agent. Simulating
-        those minutes took 3.4 s of CPU."""
+        where it is. Once the last agent stopped at least the meter's longest burn span ago, the readings in every
+        burn span are the same, so every later decision repeats this one, unless this one starts an agent. Readings
+        that stop coming change the decisions as they age. Without the early stop, the meter's tests spend 3.4 s of
+        CPU on these minutes."""
         if self.agents or self.readings_stop_at is not None:
             return False
         if self.issues == 0:
             return True
         last_stop = max((agent.stopped for agent in self.finished), default=-math.inf)
-        is_past_longest_span = self.readings[-1].time - last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
-        return is_past_longest_span and decision.action != "start"
+        is_past_longest_burn_span = self.readings[-1].time - last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
+        return is_past_longest_burn_span and decision.action != "start"
 
     def read(self, minute: int, now: float) -> None:
         fresh = self.readings_stop_at is None or minute < self.readings_stop_at
@@ -104,6 +106,18 @@ class Simulation:
 
 
 class WindDownTest(unittest.TestCase):
+    def test_stopping_early_gives_the_results_of_the_whole_window(self):
+        # With 5 issues the simulation runs out of issues; with 500 the meter holds the agents at the limit.
+        for issues in (5, 500):
+            early = Simulation(agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5).run()
+            whole = Simulation(
+                agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5, stops_early=False
+            ).run()
+            with self.subTest(issues=issues):
+                self.assertEqual(
+                    (early.peak, early.wind_downs, early.issues), (whole.peak, whole.wind_downs, whole.issues)
+                )
+
     def test_twenty_fast_agents_stop_close_to_the_limit_without_crossing_it(self):
         simulation = Simulation(agent_burn=0.05, issue_minutes=40, issues=500).run()
         self.assertLess(simulation.peak, 100)
