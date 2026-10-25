@@ -56,8 +56,8 @@ class RunsElsewhereTest(unittest.TestCase):
 
 class IsRunningTest(unittest.TestCase):
     def sleeping(self) -> subprocess.Popen:
-        """A process of /bin/sleep, once it has started. For a moment after it starts, Linux shows its command line
-        as empty."""
+        """A process of /bin/sleep, once Linux shows its command line, which is empty for a moment while the process
+        starts."""
         started = subprocess.Popen(["/bin/sleep", "30"])
         self.addCleanup(started.wait)
         self.addCleanup(started.kill)
