@@ -405,8 +405,8 @@ def runs_elsewhere(recorded: int | None, started: str | None, mine: int | None) 
 
 
 def started_at(pid: int) -> str:
-    """The process's start time as the kernel records it, in seconds since 1970 on macOS and in clock ticks since the
-    machine started on Linux, or an empty string if no process has the ID."""
+    """The process's start time, only to compare with another value from this function, or an empty string if no
+    process has the ID."""
     if sys.platform == "linux":
         try:
             # The command's name, in parentheses, can hold spaces. The start time is the 20th field after it.
@@ -442,8 +442,6 @@ CTL_KERN, KERN_PROC, KERN_PROC_PID, KERN_PROCARGS2 = 1, 14, 1, 49
 
 
 def sysctl(*name: int) -> bytes:
-    """The bytes that macOS's sysctl returns for CTL_KERN followed by `name`, or empty bytes if it returns an error, such
-    as for an ended process."""
     libc = ctypes.CDLL(None)
     full_name = (ctypes.c_int * (len(name) + 1))(CTL_KERN, *name)
     size = ctypes.c_size_t()
