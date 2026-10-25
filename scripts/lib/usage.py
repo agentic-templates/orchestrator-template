@@ -183,10 +183,12 @@ def record_status_line(account: str, status: dict) -> None:
 
 
 # The probe runs outside the project and without hooks. In the project, it would start as the orchestrator, and
-# the orchestrator's Stop hook would keep it going until it started scripts/watch.
+# the orchestrator's Stop hook would keep it going until it started scripts/watch. Without --strict-mcp-config, every
+# reading would start the account's MCP servers.
 PROBE = [
     "claude", "-p", "--model", "haiku", "--setting-sources", "user", "--settings", '{"disableAllHooks": true}',
-    "--tools", "", "--no-session-persistence", "--output-format", "stream-json", "--verbose", "Reply with ok.",
+    "--strict-mcp-config", "--tools", "", "--no-session-persistence", "--output-format", "stream-json", "--verbose",
+    "Reply with ok.",
 ]  # fmt: skip
 
 

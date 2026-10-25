@@ -52,6 +52,11 @@ HOST = re.compile(r"(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*(:[0-9]+)?")
 SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 # The agent counts as done once nothing has come from it for this long after its report.
 QUIET_SECONDS = 60
+# Main's copy, so that a branch can't add a server.
+MCP_SERVERS = ROOT / ".mcp.json"
+# A local MCP server runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the agents'
+# uv cache, where nothing an agent writes can change what it runs.
+SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
 
 
 @dataclass
@@ -67,6 +72,8 @@ class Session:
     last_output: float = field(default_factory=time.time)
     # The issue's hand-off note, deleted once the agent gives a real answer.
     note: Path | None = None
+    # The background commands and subagents that the session last reported as running.
+    background_tasks: int = 0
 
 
 def git(*args: str, cwd: Path = ROOT) -> str:
@@ -400,9 +407,12 @@ def start(
         "UV_TOOL_DIR": str(UV_CACHE / "tools"),
     }
     resumes = bool(usage.transcript(account.name, session_id))
+    # A headless session starts every MCP server it finds without asking. --strict-mcp-config limits agents to main's
+    # servers, leaving out the account's own servers and its claude.ai connectors, through which a prompt injection
+    # could reach the services the maintainer connected to Claude.
     command = [
         "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose", "--settings", settings(), "--name", agent_id,
+        "--verbose", "--settings", settings(), "--strict-mcp-config", *mcp_servers(), "--name", agent_id,
         *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
     dropped = [name for name in secret_names if name not in environment]
@@ -414,6 +424,23 @@ def start(
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
     send(input_path, prompt)
     return session
+
+
+def mcp_servers() -> list[str]:
+    """The --mcp-config argument with main's MCP servers, each local one started by SERVER_START, or nothing if main
+    has no .mcp.json."""
+    if not MCP_SERVERS.exists():
+        return []
+    try:
+        servers = json.loads(MCP_SERVERS.read_text()).get("mcpServers", {})
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"Main's .mcp.json isn't valid JSON: {error}. Fix it on main, then launch again.") from None
+    for server in servers.values():
+        # A remote server has a url instead of a command.
+        if "command" in server:
+            command = [server["command"], *server.get("args", [])]
+            server.update(command="/bin/sh", args=["-c", SERVER_START, "sh", str(ROOT), *command])
+    return ["--mcp-config", json.dumps({"mcpServers": servers})]
 
 
 def send(input_path: Path, text: str) -> None:
@@ -436,6 +463,9 @@ def handle(session: Session, line: bytes) -> None:
         session.note = None
     if event.get("type") == "rate_limit_event":
         usage.record_claude_event(session.account, event)
+    elif event.get("subtype") == "background_tasks_changed":
+        # Claude Code marks its own tasks, such as summaries and watches that may never end, as ambient.
+        session.background_tasks = len([task for task in event.get("tasks") or [] if not task.get("ambient")])
     elif event.get("type") == "result":
         # A session can give several results, such as after a background command finishes. The last one counts.
         session.report = event.get("result", "")
@@ -443,14 +473,10 @@ def handle(session: Session, line: bytes) -> None:
         usage.record_context_windows(session.account, event.get("modelUsage") or {})
 
 
-def runs_background_commands(process: subprocess.Popen) -> bool:
-    children = subprocess.run(["pgrep", "-P", str(process.pid)], capture_output=True, text=True, check=False)
-    return bool(children.stdout.strip())
-
-
 def is_done(session: Session) -> bool:
     quiet = time.time() - session.last_output > QUIET_SECONDS
-    return session.reported and quiet and not runs_background_commands(session.process)
+    # Not the agent's child processes, because its MCP servers stay child processes for as long as the agent runs.
+    return session.reported and quiet and not session.background_tasks
 
 
 def wait(session: Session, record: dict) -> str:

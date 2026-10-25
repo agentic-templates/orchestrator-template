@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -239,10 +240,64 @@ class StartTest(unittest.TestCase):
         self.assertIn("api.deepseek.com", allowed)
         self.assertIn("github.com", allowed)
 
+    def test_an_agent_starts_only_the_mcp_servers_in_mains_mcp_json(self):
+        path = self.folder / "main" / ".mcp.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps({"mcpServers": {"blender": {"command": "uvx", "args": ["blender-mcp"]}}}))
+        with mock.patch.object(launching, "MCP_SERVERS", path):
+            _, _, command = self.start(resumes=False)
+        self.assertIn("--strict-mcp-config", command)
+        self.assertEqual(list(json.loads(command[command.index("--mcp-config") + 1])["mcpServers"]), ["blender"])
+
+    def test_without_an_mcp_json_an_agent_starts_no_mcp_server(self):
+        with mock.patch.object(launching, "MCP_SERVERS", self.folder / "main" / ".mcp.json"):
+            _, _, command = self.start(resumes=False)
+        self.assertIn("--strict-mcp-config", command)
+        self.assertNotIn("--mcp-config", command)
+
     def test_a_resumed_agent_isnt_told_again(self):
         environment, message, _ = self.start(resumes=True)
         self.assertNotIn("OPENAI_API_KEY", environment)
         self.assertEqual(message, "Build issue #1.")
+
+
+class McpServersTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        self.path = self.folder / ".mcp.json"
+        patch = mock.patch.object(launching, "MCP_SERVERS", self.path)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def servers(self, servers: dict) -> dict:
+        """The MCP servers an agent gets when main's .mcp.json has these."""
+        self.path.write_text(json.dumps({"mcpServers": servers}))
+        argument = launching.mcp_servers()
+        self.assertEqual(argument[0], "--mcp-config")
+        return json.loads(argument[1])["mcpServers"]
+
+    def test_a_local_server_runs_in_the_main_checkout_without_the_agents_uv_cache(self):
+        server = self.servers({"local": {"command": "/bin/sh", "args": ["-c", "pwd; echo ${UV_CACHE_DIR-unset}"]}})
+        environment = {**os.environ, "UV_CACHE_DIR": str(self.folder / "agent-uv-cache")}
+        command = [server["local"]["command"], *server["local"]["args"]]
+        output = subprocess.run(
+            command, cwd=self.folder, env=environment, capture_output=True, text=True, check=True
+        ).stdout
+        self.assertEqual(output.splitlines(), [os.path.realpath(launching.ROOT), "unset"])
+
+    def test_a_remote_server_is_passed_as_it_is(self):
+        remote = {"type": "http", "url": "https://mcp.example.com/mcp"}
+        self.assertEqual(self.servers({"remote": remote}), {"remote": remote})
+
+    def test_without_an_mcp_json_there_is_no_server(self):
+        self.assertEqual(launching.mcp_servers(), [])
+
+    def test_an_mcp_json_that_isnt_json_stops_the_launch(self):
+        self.path.write_text("{")
+        with self.assertRaises(SystemExit):
+            launching.mcp_servers()
 
 
 class PathRefusalTest(unittest.TestCase):
@@ -512,6 +567,37 @@ class HandleTest(unittest.TestCase):
         self.note.write_text("Left: the docs.")
         launching.handle(self.session, b'{"type": "assistant"}')
         self.assertTrue(self.note.exists())
+
+
+class IsDoneTest(unittest.TestCase):
+    """An agent that has reported."""
+
+    def setUp(self):
+        self.session = launching.Session("builder-7-abc", "id", "claude", Path(), None, Path())
+        launching.handle(self.session, b'{"type": "result", "result": "Done."}')
+
+    def go_quiet(self):
+        self.session.last_output = time.time() - launching.QUIET_SECONDS - 1
+
+    def test_an_agent_with_nothing_in_the_background_is_done_once_quiet(self):
+        self.assertFalse(launching.is_done(self.session))
+        self.go_quiet()
+        self.assertTrue(launching.is_done(self.session))
+
+    def test_an_agent_is_done_only_once_its_background_commands_end(self):
+        tasks = {"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "b1"}]}
+        launching.handle(self.session, json.dumps(tasks).encode())
+        self.go_quiet()
+        self.assertFalse(launching.is_done(self.session))
+        launching.handle(self.session, json.dumps({**tasks, "tasks": []}).encode())
+        self.go_quiet()
+        self.assertTrue(launching.is_done(self.session))
+
+    def test_claude_codes_own_ambient_tasks_dont_hold_an_agent(self):
+        tasks = {"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "w1", "ambient": True}]}
+        launching.handle(self.session, json.dumps(tasks).encode())
+        self.go_quiet()
+        self.assertTrue(launching.is_done(self.session))
 
 
 class CollectNoteTest(unittest.TestCase):

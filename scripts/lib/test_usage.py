@@ -120,6 +120,11 @@ class CommandForTest(unittest.TestCase):
         self.assertEqual(output, "unset\n")
 
 
+class ProbeTest(unittest.TestCase):
+    def test_the_probe_starts_no_mcp_server(self):
+        self.assertIn("--strict-mcp-config", usage.PROBE)
+
+
 class RunningAgentsTest(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
