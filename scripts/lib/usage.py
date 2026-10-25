@@ -405,18 +405,19 @@ def runs_elsewhere(recorded: int | None, started: str | None, mine: int | None) 
 
 
 def started_at(pid: int) -> str:
-    """A value that tells the process apart from a later one with the same ID, or an empty string if no process has it."""
+    """The process's start time as the kernel records it, in seconds since 1970 on macOS and in clock ticks since the
+    machine started on Linux, or an empty string if no process has the ID."""
     if sys.platform == "linux":
         try:
             # The command's name, in parentheses, can hold spaces. The start time is the 20th field after it.
             return Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[19]
         except (FileNotFoundError, ProcessLookupError):
             return ""
-    info = kernel_info(KERN_PROC, KERN_PROC_PID, pid)
-    if not info:
+    record = sysctl(KERN_PROC, KERN_PROC_PID, pid)
+    if not record:
         return ""
-    # The process record that kernel_info returns starts with the start time, in seconds and microseconds.
-    seconds, microseconds = struct.unpack_from("qi", info)
+    # The process record starts with the start time, in seconds and microseconds.
+    seconds, microseconds = struct.unpack_from("qi", record)
     return f"{seconds}.{microseconds:06d}"
 
 
@@ -428,27 +429,28 @@ def arguments(pid: int) -> list[str]:
         except (FileNotFoundError, ProcessLookupError):
             return []
     else:
-        # The number of arguments, the program's path, padding, then the arguments, each ended by a zero byte.
-        info = kernel_info(KERN_PROCARGS2, pid)
-        count = int.from_bytes(info[:4], sys.byteorder)
-        raw = info[4:].partition(b"\0")[2].lstrip(b"\0").split(b"\0")[:count]
+        # sysctl returns the number of arguments, the program's path, padding, then the arguments, each ended by a zero byte.
+        command_line = sysctl(KERN_PROCARGS2, pid)
+        count = int.from_bytes(command_line[:4], sys.byteorder)
+        raw = command_line[4:].partition(b"\0")[2].lstrip(b"\0").split(b"\0")[:count]
     return [argument.decode(errors="replace") for argument in raw]
 
 
-# The agents' sandbox refuses to start programs that run as root, such as ps. These are the macOS sysctl names that ps
-# reads, which the sandbox allows.
+# The macOS sysctl names that ps reads. The agents' sandbox lets agents read them but refuses to start programs that run
+# as root, such as ps.
 CTL_KERN, KERN_PROC, KERN_PROC_PID, KERN_PROCARGS2 = 1, 14, 1, 49
 
 
-def kernel_info(*name: int) -> bytes:
-    """The bytes macOS's sysctl returns for the name, or empty bytes if it returns an error, such as for an ended process."""
+def sysctl(*name: int) -> bytes:
+    """The bytes that macOS's sysctl returns for CTL_KERN followed by `name`, or empty bytes if it returns an error, such
+    as for an ended process."""
     libc = ctypes.CDLL(None)
-    path = (ctypes.c_int * (len(name) + 1))(CTL_KERN, *name)
+    full_name = (ctypes.c_int * (len(name) + 1))(CTL_KERN, *name)
     size = ctypes.c_size_t()
-    if libc.sysctl(path, len(path), None, ctypes.byref(size), None, 0) != 0:
+    if libc.sysctl(full_name, len(full_name), None, ctypes.byref(size), None, 0) != 0:
         return b""
     buffer = ctypes.create_string_buffer(size.value)
-    if libc.sysctl(path, len(path), buffer, ctypes.byref(size), None, 0) != 0:
+    if libc.sysctl(full_name, len(full_name), buffer, ctypes.byref(size), None, 0) != 0:
         return b""
     return buffer.raw[: size.value]
 

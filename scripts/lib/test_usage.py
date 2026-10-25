@@ -38,7 +38,7 @@ class RunsElsewhereTest(unittest.TestCase):
         self.assertTrue(usage.runs_elsewhere(os.getpid(), usage.started_at(os.getpid()), mine=1))
 
     def test_a_later_process_with_the_same_id_isnt_the_orchestrator(self):
-        self.assertFalse(usage.runs_elsewhere(os.getpid(), "1792000000.000000", mine=1))
+        self.assertFalse(usage.runs_elsewhere(os.getpid(), started="1792000000.000000", mine=1))
 
     def test_the_recorded_orchestrator_is_this_session(self):
         self.assertFalse(usage.runs_elsewhere(os.getpid(), usage.started_at(os.getpid()), mine=os.getpid()))
@@ -55,9 +55,8 @@ class RunsElsewhereTest(unittest.TestCase):
 
 
 class IsRunningTest(unittest.TestCase):
-    def sleeping(self) -> subprocess.Popen:
-        """A process of /bin/sleep, once Linux shows its command line, which is empty for a moment while the process
-        starts."""
+    def start_sleep_process(self) -> subprocess.Popen:
+        """Returns the process once Linux shows its command line, which is empty for a moment while the process starts."""
         started = subprocess.Popen(["/bin/sleep", "30"])
         self.addCleanup(started.wait)
         self.addCleanup(started.kill)
@@ -70,10 +69,10 @@ class IsRunningTest(unittest.TestCase):
         self.assertFalse(usage.is_running(os.getpid(), "launch"))
 
     def test_a_program_started_by_its_full_path_is_running(self):
-        self.assertTrue(usage.is_running(self.sleeping().pid, "sleep"))
+        self.assertTrue(usage.is_running(self.start_sleep_process().pid, "sleep"))
 
-    def test_reads_a_process_when_ps_cant_start(self):
-        started = self.sleeping()
+    def test_reads_the_command_line_and_start_time_when_ps_cant_start(self):
+        started = self.start_sleep_process()
         # Without a PATH, ps can't start, as in the agents' sandbox.
         with mock.patch.dict(os.environ, {"PATH": ""}):
             self.assertTrue(usage.is_running(started.pid, "sleep"))
