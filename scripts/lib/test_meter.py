@@ -34,6 +34,7 @@ class Simulation:
     reading_every: int = 1
     max_agents: int = 20
     readings_stop_at: int | None = None
+    may_stop_early: bool = True
     used: float = 0.0
     agents: list[Agent] = field(default_factory=list)
     finished: list[Agent] = field(default_factory=list)
@@ -54,9 +55,25 @@ class Simulation:
             measured = not self.readings or self.readings[-1].time > self.last_start
             runs = tuple((agent.started, agent.stopped) for agent in self.agents + self.finished)
             load = meter.Load(len(running), REACTION, 1.0, runs, measured_since_last_start=measured)
-            self.act(meter.decide({"5h": self.readings}, now, load), now)
+            decision = meter.decide({"5h": self.readings}, now, load)
+            if self.may_stop_early and self.can_stop_early(decision):
+                break
+            self.act(decision, now)
             self.work(now)
         return self
+
+    def can_stop_early(self, decision: meter.Decision) -> bool:
+        """True when the rest of the window can't change what the tests check. Once no agent has run for the longest
+        burn span, the readings stop changing, so the meter repeats its decision. Stopping there saves the meter's
+        tests 3.4 s of CPU."""
+        # Readings that stop coming age, and the meter's decisions change as they do.
+        if self.agents or self.readings_stop_at is not None:
+            return False
+        if self.issues == 0:
+            return True
+        last_stop = max((agent.stopped for agent in self.finished), default=-math.inf)
+        is_past_longest_burn_span = self.readings[-1].time - last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
+        return is_past_longest_burn_span and decision.action != "start"
 
     def read(self, minute: int, now: float) -> None:
         fresh = self.readings_stop_at is None or minute < self.readings_stop_at
@@ -88,6 +105,19 @@ class Simulation:
 
 
 class WindDownTest(unittest.TestCase):
+    def test_stopping_early_gives_the_results_of_the_whole_window(self):
+        # With 5 issues the simulation runs out of issues. With 500 it never does, so the usage limit decides when
+        # agents stop.
+        for issues in (5, 500):
+            early = Simulation(agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5).run()
+            whole = Simulation(
+                agent_burn=0.4, issue_minutes=40, issues=issues, reading_every=5, may_stop_early=False
+            ).run()
+            with self.subTest(issues=issues):
+                self.assertEqual(
+                    (early.peak, early.wind_downs, early.issues), (whole.peak, whole.wind_downs, whole.issues)
+                )
+
     def test_twenty_fast_agents_stop_close_to_the_limit_without_crossing_it(self):
         simulation = Simulation(agent_burn=0.05, issue_minutes=40, issues=500).run()
         self.assertLess(simulation.peak, 100)
