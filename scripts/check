@@ -25,9 +25,9 @@ import prose
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# Each tool runs once, on the changed files of its kind, with the files appended to its command. The loop's own
-# Python, under scripts/, is checked with the loop's settings in scripts/, so that a project's settings, such as a
-# ruff section in its pyproject.toml, don't change the loop's checks.
+# Each tool runs once, on the changed files of its kind, with the files appended to its command. The loop-python
+# tools check the loop's own scripts with the settings in scripts/, so that a project's settings, such as a ruff
+# section in its pyproject.toml, don't change the loop's checks.
 TOOLS = [
     ("loop-python", ["uvx", "ruff@0.17.0", "check", "--quiet", "--config", "scripts/ruff.toml"]),
     ("loop-python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
