@@ -73,8 +73,8 @@ REVIEW_TOOLS = [
     ),
 ]
 # Each test command runs once when the branch changes a file of its kind. PYTHONSAFEPATH stops Python from putting the
-# current folder first on its import path. Without it, a project's own module, such as a signal.py at the
-# repository's root, replaces the standard library's module of the same name in the loop's tests and the processes they start.
+# current folder first on its import path. Without it, a project's own module, such as a signal.py at the repository's
+# root, replaces the standard library's module of the same name in the loop's tests and the processes they start.
 TESTS = [
     (
         "loop-python",
