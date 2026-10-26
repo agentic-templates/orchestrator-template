@@ -45,7 +45,7 @@ A comment gives what a later editor needs to know before they change the line: a
 
 ## Test behavior
 
-- Test what the code does through its public interface, not how it does it.
+- Test what the code does through its public interface, not how it does it. Name each test for the behavior it checks.
 - Check each result against what the requirement says. Don't take the expected value from the code's own output, and don't compute it the way the code does, because then the test repeats the code instead of checking it.
 - Test the edges of each requirement as well as a typical case, such as empty input and the values on both sides of a limit.
 - Write the tests for the behavior your issue adds or fixes before you change the code, and see them fail.
