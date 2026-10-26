@@ -494,14 +494,9 @@ class NestedRepositoryTest(unittest.TestCase):
     def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
         for hook in ("post-commit", "pre-push"):
             plant_hook(self.main / ".git" / "hooks" / hook, self.marker)
-        self.assertEqual(launching.save_work(self.worktree), "")
-        self.assertIn("new.py", self.committed())
-        self.assertFalse(self.marker.exists())
-
-    def test_hooks_set_in_the_main_checkouts_config_dont_run_when_the_work_is_saved(self):
+        # A hook set in git config, for the events that a save fired in a test of every event.
         plant_hook(self.root / "hook", self.marker)
         run_git(self.main, "config", "hook.tests.command", str(self.root / "hook"))
-        # The events that a save fired in a test of every event.
         for event in ("prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push"):
             run_git(self.main, "config", "--add", "hook.tests.event", event)
         self.assertEqual(launching.save_work(self.worktree), "")
