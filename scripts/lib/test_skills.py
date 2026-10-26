@@ -77,9 +77,9 @@ class PreloadTest(unittest.TestCase):
         # skill.
         listed = set(re.findall(r"^- `([^`]+)`:", (CHECKOUT / "AGENTS.md").read_text(), re.MULTILINE))
         problems = [
-            f'No agent type preloads `{skill}`, and AGENTS.md has no line "- `{skill}`: ..." saying when to read it, so '
-            'no agent finds it. Add that line to "Read the skills" in AGENTS.md, or add the skill to the `skills:` of '
-            "the agent types that need it."
+            f'No agent type preloads `{skill}`, and no line "- `{skill}`: ..." in AGENTS.md says when to read it, so no '
+            'agent finds it. Add that line to "Read the skills" in AGENTS.md, or add the skill to the `skills:` of the '
+            "agent types that need it."
             for skill in skill_names()
             if skill not in preloaded and skill not in listed
         ]
