@@ -482,7 +482,7 @@ class NestedRepositoryTest(unittest.TestCase):
         launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
-    def test_a_submodule_marked_ignore_none_runs_no_fsmonitor_when_git_reads_the_worktree(self):
+    def test_a_nested_repository_that_gitmodules_marks_ignore_none_runs_no_fsmonitor(self):
         self.stage_nested()
         (self.worktree / ".gitmodules").write_text('[submodule "repo"]\n\tpath = vendor/repo\n\tignore = none\n')
         # No setting stops a nested repository's filter, so this test removes it and checks only the settings.
@@ -500,7 +500,7 @@ class NestedRepositoryTest(unittest.TestCase):
             run_git(self.main, "config", "--add", "hook.tests.event", event)
 
     def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
-        # The events that a save fired in a test of every event.
+        # The five events whose hooks a save ran, when hooks were set for every event.
         events = ("prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push")
         self.plant_main_hooks(*events)
         self.assertEqual(launching.save_work(self.worktree), "")
