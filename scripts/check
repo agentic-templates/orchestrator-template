@@ -24,14 +24,19 @@ import files
 import prose
 
 ROOT = Path(__file__).resolve().parent.parent
+COMPLEXIPY_DEFAULTS = ["--ignore-complexity=false", "--snapshot-create=false"]
 
 # Each tool runs once, on the changed files of its kind, with the files appended to its command. The loop-python
-# tools check the loop's own scripts with the settings in scripts/, so that a project's settings, such as a ruff
-# section in its pyproject.toml, don't change the loop's checks.
+# tools take their settings from scripts/ruff.toml and their own flags, so that a project's settings, such as a ruff
+# section in its pyproject.toml, don't change the loop's checks. complexipy reads two of its settings from a project's
+# pyproject.toml or complexipy.toml unless its flags set them.
 TOOLS = [
     ("loop-python", ["uvx", "ruff@0.17.0", "check", "--quiet", "--config", "scripts/ruff.toml"]),
     ("loop-python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
-    ("loop-python", ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "25", "--failed", "--plain"]),
+    (
+        "loop-python",
+        ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "25", "--failed", "--plain", *COMPLEXIPY_DEFAULTS],
+    ),
     ("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
     ("workflow", ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]),
     ("any", ["uvx", "typos@1.51.1"]),
@@ -39,7 +44,10 @@ TOOLS = [
 # With --review, these run instead, and list what a reviewer should judge without failing the check.
 # A function's cognitive complexity fails the check at 25, and a reviewer sees it from 15.
 REVIEW_TOOLS = [
-    ("loop-python", ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "15", "--failed", "--plain"]),
+    (
+        "loop-python",
+        ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "15", "--failed", "--plain", *COMPLEXIPY_DEFAULTS],
+    ),
 ]
 # Each test command runs once when the branch changes a file of its kind.
 TESTS = [
@@ -48,10 +56,12 @@ TESTS = [
         ["uv", "run", "--no-project", "--python", "3.12", "python", "-m", "unittest", "discover", "-s", "scripts/lib"],
     ),
 ]
-# ty runs with the tests, on every file of the loop's Python, because a change can break a caller in a file it doesn't
-# touch. It gets the files by name, because in a folder it skips the scripts without .py. The search path is on the
-# command line, because ty reads a config file's extra-paths from each PEP 723 script's own folder.
-LOOP_TY = ["uvx", "ty@0.0.91", "check", "--config-file", "scripts/ty.toml", "--extra-search-path", "scripts/lib"]
+# The type checker ty runs with the tests, on every loop-python file, because a change can break a caller in a file it
+# doesn't touch. It gets the files by name, because in a folder it skips the files without .py. With --project, it
+# reads scripts/ty.toml instead of the project's settings, and the project's own modules, such as a json.py at its
+# root, can't hide the standard library's. The search path is on the command line, because ty reads a config file's
+# extra-paths relative to each PEP 723 script's own folder.
+LOOP_TY = ["uvx", "ty@0.0.91", "check", "--project", "scripts", "--extra-search-path", "scripts/lib"]
 
 
 def git(*args: str) -> list[str]:
@@ -70,7 +80,7 @@ def changed_files(base: str | None) -> list[str]:
     return sorted(set(git("diff", "--name-only", "--diff-filter=d", base, "HEAD") + local))
 
 
-def existing_files(paths: list[str]) -> list[str]:
+def regular_files(paths: list[str]) -> list[str]:
     return [path for path in paths if (ROOT / path).is_file() and not (ROOT / path).is_symlink()]
 
 
@@ -123,13 +133,13 @@ def main() -> int:
     parser.add_argument("--base", help="count the changes from this commit")
     parser.add_argument("--review", action="store_true", help="list what a reviewer should judge, without failing")
     arguments = parser.parse_args()
-    paths = existing_files(git("ls-files") if arguments.all else changed_files(arguments.base))
+    paths = regular_files(git("ls-files") if arguments.all else changed_files(arguments.base))
     if arguments.review:
         run_tools(paths, REVIEW_TOOLS, tests=[])
         return 0
     problems = check_files(paths)
     print("\n".join(problems), end="\n" if problems else "", flush=True)
-    loop_python = [path for path in existing_files(git("ls-files", "scripts")) if kind(path) == "loop-python"]
+    loop_python = [path for path in regular_files(git("ls-files")) if kind(path) == "loop-python"]
     tools_passed = run_tools(paths, tests=[*TESTS, ("loop-python", [*LOOP_TY, *loop_python])])
     return 0 if tools_passed and not problems else 1
 

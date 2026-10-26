@@ -250,11 +250,11 @@ def codex_rate_limits(account: Account) -> dict[str, dict]:
 
 
 def read_rate_limits(server: subprocess.Popen) -> dict[str, dict]:
-    output = server.stdout
-    assert output is not None
+    stdout = server.stdout
+    assert stdout is not None
     deadline = time.time() + 30
-    while time.time() < deadline and select.select([output], [], [], 1)[0]:
-        line = output.readline()
+    while time.time() < deadline and select.select([stdout], [], [], 1)[0]:
+        line = stdout.readline()
         message = json.loads(line) if line.startswith("{") else {}
         if message.get("id") == 2:
             limits = message.get("result", {}).get("rateLimits", message.get("result", {}))
