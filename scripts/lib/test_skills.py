@@ -73,7 +73,8 @@ class PreloadTest(unittest.TestCase):
 
     def test_agents_md_lists_each_skill_that_no_agent_type_preloads(self):
         preloaded = {skill for agent_file in AGENT_FILES for skill in preloaded_skills(agent_file.stem)}
-        # Agents read all of AGENTS.md, so a line such as "- `planning`: before you ..." anywhere in it lists the skill.
+        # Agents read all of AGENTS.md, so a line such as "- `planning`: before you ..." anywhere in it lists the
+        # skill.
         listed = set(re.findall(r"^- `([^`]+)`:", (CHECKOUT / "AGENTS.md").read_text(), re.MULTILINE))
         problems = [
             f'No agent type preloads `{skill}`, and AGENTS.md has no line "- `{skill}`: ..." saying when to read it, so '
