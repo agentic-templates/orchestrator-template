@@ -81,8 +81,8 @@ def git(*args: str, cwd: Path = ROOT) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-# Every hook event in githooks(5). core.hooksPath stops only the hooks in a hooks folder. Turning off each event also
-# stops the hooks set in git config (hook.<name>.command).
+# Every hook event in githooks(5). core.hooksPath stops only the hooks in a hooks folder, and on git 2.56 turning off
+# an event stops only the hooks set in git config (hook.<name>.command), whatever git-config(1) says.
 HOOK_EVENTS = (
     "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg",
     "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push", "pre-receive", "update",
@@ -91,7 +91,8 @@ HOOK_EVENTS = (
     "p4-post-changelist", "p4-pre-submit", "post-index-change",
 )  # fmt: skip
 # Git outside the sandbox would run code that an agent controls: programs that a nested repository's config names,
-# and the maintainer's hooks, such as a pre-push hook that runs the tests on the agent's work. These settings stop
+# and the maintainer's hooks, such as a pre-push hook that runs the tests on the agent's work, or a post-checkout hook
+# that installs its dependencies. These settings stop
 # every hook and a nested repository's fsmonitor. They don't stop its filters, which git runs on a file's content as
 # it reads the file. And `ignore = none` in .gitmodules makes `git status` read a nested repository, filters included,
 # despite diff.ignoreSubmodules. So callers also leave what nested_repositories() finds out of `git status` and
@@ -184,7 +185,7 @@ def make_worktree(agent_id: str, issue: int | None = None, continues: bool = Fal
     with git_lock():
         if issue is None:
             git("fetch", "--quiet", "origin")
-            git("worktree", "add", "--quiet", "--detach", str(path), "origin/main")
+            git(*SAFE_GIT, "worktree", "add", "--quiet", "--detach", str(path), "origin/main")
         else:
             add_branch_worktree(path, issue, continues)
     (path / ".loop").mkdir()
@@ -224,7 +225,8 @@ def add_branch_worktree(path: Path, issue: int, continues: bool) -> None:
         # A builder that starts from main couldn't push over the branch, because the ruleset refuses force pushes.
         raise SystemExit(f"{branch} exists on GitHub. Launch with --successor to continue it.")
     start = f"origin/{branch}" if pushed else "origin/main"
-    git("worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
+    # A successor checks out the last builder's pushed work, which a post-checkout hook would run on.
+    git(*SAFE_GIT, "worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
     git("config", f"branch.{branch}.remote", "origin")
     git("config", f"branch.{branch}.merge", f"refs/heads/{branch}")
 

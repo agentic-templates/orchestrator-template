@@ -491,16 +491,30 @@ class NestedRepositoryTest(unittest.TestCase):
         launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
-    def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
-        for hook in ("post-commit", "pre-push"):
-            plant_hook(self.main / ".git" / "hooks" / hook, self.marker)
-        # A hook set in git config, for the events that a save fired in a test of every event.
+    def plant_main_hooks(self, *events: str) -> None:
+        """Hooks in the main checkout's hooks folder and in its git config, for the events."""
         plant_hook(self.root / "hook", self.marker)
         run_git(self.main, "config", "hook.tests.command", str(self.root / "hook"))
-        for event in ("prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push"):
+        for event in events:
+            plant_hook(self.main / ".git" / "hooks" / event, self.marker)
             run_git(self.main, "config", "--add", "hook.tests.event", event)
+
+    def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
+        # The events that a save fired in a test of every event.
+        events = ("prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push")
+        self.plant_main_hooks(*events)
         self.assertEqual(launching.save_work(self.worktree), "")
         self.assertIn("new.py", self.committed())
+        self.assertFalse(self.marker.exists())
+
+    def test_the_main_checkouts_hooks_dont_run_when_a_successor_checks_out_the_work(self):
+        self.assertEqual(launching.save_work(self.worktree), "")
+        successor = self.root / "successor"
+        with mock.patch.dict(launching.git.__kwdefaults__, {"cwd": self.main}):
+            launching.remove_worktree(self.worktree)
+            self.plant_main_hooks("post-checkout")
+            launching.add_branch_worktree(successor, 1, continues=True)
+        self.assertTrue((successor / "new.py").exists())
         self.assertFalse(self.marker.exists())
 
     def test_a_worktree_with_only_a_nested_repository_has_no_changes(self):
