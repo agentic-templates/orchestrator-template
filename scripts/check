@@ -18,12 +18,22 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import files
 import prose
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+class Tool(NamedTuple):
+    kind: str
+    command: list[str]
+    # Printed after the tool's own output when it fails.
+    hint: str = ""
+
+
 COMPLEXIPY_FIXED_SETTINGS = [
     "--ignore-complexity=false",
     "--snapshot-create=false",
@@ -39,9 +49,9 @@ COMPLEXIPY_FIXED_SETTINGS = [
 # hides the list of functions over the limit, though the check still fails. A project's branch in
 # [tool.complexipy.diff] fails the check only on functions whose complexity rose against that branch.
 TOOLS = [
-    ("loop-python", ["uvx", "ruff@0.17.0", "check", "--quiet", "--config", "scripts/ruff.toml"]),
-    ("loop-python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
-    (
+    Tool("loop-python", ["uvx", "ruff@0.17.0", "check", "--quiet", "--config", "scripts/ruff.toml"]),
+    Tool("loop-python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
+    Tool(
         "loop-python",
         [
             "uvx",
@@ -52,15 +62,18 @@ TOOLS = [
             "--plain",
             *COMPLEXIPY_FIXED_SETTINGS,
         ],
+        "These functions are over the cognitive-complexity limit. Change a function only where the change makes it"
+        " easier to read. If every change you can find would make the function harder to read, leave the function as"
+        " it is, and end its `def` line with `# complexipy: ignore because <why the function reads best as it is>`.",
     ),
-    ("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
-    ("workflow", ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]),
-    ("any", ["uvx", "typos@1.51.1"]),
+    Tool("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
+    Tool("workflow", ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]),
+    Tool("any", ["uvx", "typos@1.51.1"]),
 ]
 # With --review, these run instead, and list what a reviewer should judge without failing the check.
 # A function's cognitive complexity fails the check at 25, and a reviewer sees it from 15.
 REVIEW_TOOLS = [
-    (
+    Tool(
         "loop-python",
         [
             "uvx",
@@ -158,10 +171,12 @@ def check_files(paths: list[str]) -> list[str]:
 def run_tools(paths: list[str], tools: list = TOOLS, tests: list = TESTS) -> bool:
     kinds = {path: kind(path) for path in paths}
     passed = True
-    for wanted, command in tools:
-        targets = [path for path in paths if wanted in ("any", kinds[path])]
-        if targets and subprocess.run([*command, *targets], check=False, cwd=ROOT).returncode != 0:
+    for tool in tools:
+        targets = [path for path in paths if tool.kind in ("any", kinds[path])]
+        if targets and subprocess.run([*tool.command, *targets], check=False, cwd=ROOT).returncode != 0:
             passed = False
+            if tool.hint:
+                print(tool.hint, flush=True)
     for wanted, command in tests:
         if wanted in kinds.values() and subprocess.run(command, check=False, cwd=ROOT).returncode != 0:
             passed = False
