@@ -100,7 +100,7 @@ def main() -> int:
         return 2
     if arguments.resume:
         return resume(arguments)
-    if launching.builds(arguments.agent_type) and (refusal := launching.builder_refusal(arguments.number)):
+    if launching.builds(arguments.agent_type) and (refusal := launching.refuse_builder(arguments.number)):
         print(refusal)
         return 2
     decisions = metering.decisions()
