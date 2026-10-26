@@ -9,8 +9,6 @@ import usage
 CHECKOUT = Path(__file__).resolve().parents[2]
 SKILLS = CHECKOUT / ".agents" / "skills"
 AGENT_FILES = sorted((CHECKOUT / ".claude" / "agents").glob("*.md"))
-# The section of AGENTS.md that lists the skills, where agents find the ones their type doesn't preload.
-READ_THE_SKILLS = "Read the skills"
 
 
 def skill_names() -> list[str]:
@@ -31,10 +29,6 @@ def preloaded_skills(agent_type: str) -> list[str]:
 
 def without_front_matter(text: str) -> str:
     return text.split("---", 2)[2]
-
-
-def section(text: str, heading: str) -> str:
-    return text.split(f"## {heading}\n")[1].split("\n## ")[0]
 
 
 def names_skill(text: str, skill: str) -> bool:
@@ -70,7 +64,7 @@ class PreloadTest(unittest.TestCase):
         names = skill_names()
         problems = [
             f"`.claude/agents/{agent_file.name}` preloads `{skill}`, but `.agents/skills/{skill}/SKILL.md` doesn't "
-            "exist. Correct the name, or add the skill."
+            "exist. Correct the name in `skills:`, or remove it."
             for agent_file in AGENT_FILES
             for skill in preloaded_skills(agent_file.stem)
             if skill not in names
@@ -79,16 +73,12 @@ class PreloadTest(unittest.TestCase):
 
     def test_agents_md_lists_each_skill_that_no_agent_type_preloads(self):
         preloaded = {skill for agent_file in AGENT_FILES for skill in preloaded_skills(agent_file.stem)}
-        agents_md = (CHECKOUT / "AGENTS.md").read_text()
-        self.assertTrue(
-            f"## {READ_THE_SKILLS}\n" in agents_md,
-            f'AGENTS.md has no "## {READ_THE_SKILLS}" heading, and this test reads the list under it. Restore the '
-            "heading, or change the one this test looks for.",
-        )
-        listed = set(re.findall(r"^- `([^`]+)`", section(agents_md, READ_THE_SKILLS), re.MULTILINE))
+        # Agents read all of AGENTS.md, so a line such as "- `planning`: before you ..." anywhere in it lists the skill.
+        listed = set(re.findall(r"^- `([^`]+)`:", (CHECKOUT / "AGENTS.md").read_text(), re.MULTILINE))
         problems = [
-            f'No agent type preloads `{skill}`, and the section "{READ_THE_SKILLS}" in AGENTS.md doesn\'t list it, so '
-            "no agent finds it. Add it to that section, or to the `skills:` of the agent types that need it."
+            f'No agent type preloads `{skill}`, and AGENTS.md has no line "- `{skill}`: ..." saying when to read it, so '
+            'no agent finds it. Add that line to "Read the skills" in AGENTS.md, or add the skill to the `skills:` of '
+            "the agent types that need it."
             for skill in skill_names()
             if skill not in preloaded and skill not in listed
         ]
