@@ -200,14 +200,14 @@ class DecideTest(unittest.TestCase):
         decision = meter.decide({"5h": readings}, 300, meter.Load(1, REACTION, 1.0, ((0.0, None),)))
         self.assertEqual((decision.action, decision.burn), ("hold", 0.2))
 
-    def test_use_that_hasnt_shown_counts_at_one_percent_over_the_longest_span_without_a_rise(self):
-        # Ten agents ran through readings, taken every five minutes, that didn't move for 20.
+    def test_agents_whose_use_hasnt_shown_count_at_one_percent_over_the_longest_span_without_a_rise(self):
+        # Ten agents ran while readings, taken every five minutes, didn't move for 20 minutes.
         readings = [Reading(time, 95, 900_000) for time in range(0, 1_201, 300)]
         runs = tuple((-5_000.0, None) for _ in range(10))
         decision = meter.decide({"7d": readings}, 1_200, meter.Load(10, REACTION, 1.0, runs))
         self.assertEqual((decision.action, decision.burn), ("start", 0.05))
 
-    def test_agents_count_at_the_rate_of_a_recent_rise(self):
+    def test_agents_that_started_after_a_rise_count_at_the_faster_rate(self):
         # One agent used 1% in 15 minutes, then 2% in the next 5; two more started after the latest reading.
         readings = [Reading(0, 88, 10_000), Reading(900, 89, 10_000), Reading(1_200, 91, 10_000)]
         runs = ((-1_000.0, None), (1_250.0, None), (1_250.0, None))

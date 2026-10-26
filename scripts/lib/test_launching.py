@@ -416,7 +416,7 @@ class NestedRepositoryTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        # Building these repositories with git takes 1.9 s of CPU across the five tests, so they're built once. Git
+        # Building these repositories with git takes 0.16 s of CPU, so they're built once, not for each test. Git
         # writes absolute paths into them, so setUp copies them to the path where they were built.
         folder = tempfile.TemporaryDirectory()
         cls.addClassCleanup(folder.cleanup)
@@ -482,10 +482,10 @@ class NestedRepositoryTest(unittest.TestCase):
         launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
-    def test_a_nested_repository_that_gitmodules_makes_git_read_runs_no_fsmonitor_or_hook(self):
+    def test_a_submodule_marked_ignore_none_runs_no_fsmonitor_or_hook_when_git_reads_the_worktree(self):
         self.stage_nested()
         (self.worktree / ".gitmodules").write_text('[submodule "repo"]\n\tpath = vendor/repo\n\tignore = none\n')
-        # The settings don't stop a filter, which is why callers leave nested repositories out.
+        # No setting stops a nested repository's filter, so this test removes it and checks only the settings.
         run_git(self.nested, "config", "--unset", "filter.evil.clean")
         run_git(self.nested, "config", "core.fsmonitor", f"touch {self.marker}; false")
         hooks = self.root / "planted-hooks"
@@ -495,7 +495,6 @@ class NestedRepositoryTest(unittest.TestCase):
         self.assertFalse(self.marker.exists())
 
     def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
-        # Such as a pre-push hook that runs the project's tests, which would run the agent's code outside the sandbox.
         for hook in ("post-commit", "pre-push"):
             plant_hook(self.main / ".git" / "hooks" / hook, self.marker)
         self.assertEqual(launching.save_work(self.worktree), "")

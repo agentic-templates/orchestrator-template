@@ -81,10 +81,11 @@ def git(*args: str, cwd: Path = ROOT) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-# Git outside the sandbox would run code that an agent controls: the programs that a nested repository's config names,
-# and the main checkout's own hooks, such as a pre-push hook that runs the tests on the agent's work. These settings
-# stop the hooks and a nested repository's fsmonitor, but not its filters, and a line in .gitmodules makes git read it
-# despite diff.ignoreSubmodules. So callers also leave out what nested_repositories() finds.
+# Git outside the sandbox would run code that an agent controls: programs that a nested repository's config names,
+# and the main checkout's hooks, such as a pre-push hook that runs the tests on the agent's work. These settings stop
+# every hook and a nested repository's fsmonitor. They don't stop its filters, and `ignore = none` in .gitmodules
+# makes git read the nested repository despite diff.ignoreSubmodules. So callers also leave what
+# nested_repositories() finds out of `git status` and `git add`.
 SAFE_GIT = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=all")
 
 
