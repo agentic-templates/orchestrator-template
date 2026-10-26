@@ -34,10 +34,10 @@ COMPLEXIPY_FIXED_SETTINGS = [
 # Each tool runs once, on the changed files of its kind, with the files appended to its command. The loop-python
 # tools take their settings from scripts/ruff.toml and their own flags, so that a project's settings, such as a ruff
 # section in its pyproject.toml, don't change the loop's checks. complexipy reads its settings from the pyproject.toml
-# or complexipy.toml at the repository's root, so COMPLEXIPY_FIXED_SETTINGS overrides every setting that could let a function
-# over the limit pass or go unlisted. Two settings have no flag that overrides them. A project's quiet = true hides
-# complexipy's messages, though the check still fails. A project's branch in [tool.complexipy.diff] fails the check only
-# on functions whose complexity rose against that branch.
+# or complexipy.toml at the repository's root, so COMPLEXIPY_FIXED_SETTINGS overrides every setting that could let a
+# function over the limit pass or go unlisted. Two settings have no flag that overrides them. A project's quiet = true
+# hides complexipy's messages, though the check still fails. A project's branch in [tool.complexipy.diff] fails the
+# check only on functions whose complexity rose against that branch.
 TOOLS = [
     ("loop-python", ["uvx", "ruff@0.17.0", "check", "--quiet", "--config", "scripts/ruff.toml"]),
     ("loop-python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
