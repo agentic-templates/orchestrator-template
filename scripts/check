@@ -34,10 +34,10 @@ COMPLEXIPY_FIXED_SETTINGS = [
 # Each tool runs once, on the changed files of its kind, with the files appended to its command. The loop-python
 # tools take their settings from scripts/ruff.toml and their own flags, so that a project's settings, such as a ruff
 # section in its pyproject.toml, don't change the loop's checks. complexipy reads its settings from the pyproject.toml
-# or complexipy.toml at the repository's root, so COMPLEXIPY_FIXED_SETTINGS overrides every setting that could let a
-# function over the limit pass or go unlisted. Two settings have no flag that overrides them. A project's quiet = true
-# hides complexipy's messages, though the check still fails. A project's branch in [tool.complexipy.diff] fails the
-# check only on functions whose complexity rose against that branch.
+# or complexipy.toml at the repository's root, so COMPLEXIPY_FIXED_SETTINGS overrides each setting that could let a
+# function over the limit pass or stay out of the report, except two that no flag overrides. A project's quiet = true
+# hides the list of functions over the limit, though the check still fails. A project's branch in
+# [tool.complexipy.diff] fails the check only on functions whose complexity rose against that branch.
 TOOLS = [
     ("loop-python", ["uvx", "ruff@0.17.0", "check", "--quiet", "--config", "scripts/ruff.toml"]),
     ("loop-python", ["uvx", "ruff@0.17.0", "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
@@ -98,9 +98,10 @@ TESTS = [
 ]
 # The type checker ty runs with the tests, on every loop-python file, because a change can break a caller in a file it
 # doesn't touch. It gets the files by name, because in a folder it skips the files without .py. --project scripts makes
-# ty treat scripts/ as the project, so it reads scripts/ty.toml instead of the settings at the repository's root, and a
-# json.py at the repository's root doesn't replace the standard library's json. --extra-search-path is on the command
-# line, because ty reads a config file's extra-paths relative to each PEP 723 script's own folder.
+# ty read scripts/ty.toml instead of the settings at the repository's root. It also keeps a json.py at the repository's
+# root from replacing the standard library's json, because ty looks for the project's own modules in the project's
+# folder first. --extra-search-path is on the command line, because ty reads a config file's extra-paths relative to
+# each PEP 723 script's own folder.
 LOOP_TY = ["uvx", "ty@0.0.91", "check", "--project", "scripts", "--extra-search-path", "scripts/lib"]
 
 
