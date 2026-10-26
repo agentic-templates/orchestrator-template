@@ -182,8 +182,8 @@ def refuse_builder(issue: int) -> str:
     )
     return (
         f"Issue #{issue} has had many builder sessions, so the launcher labelled it {backlog.NEEDS_DECISION} and "
-        f"started no builder. {first_step}, write in the issue what blocks it and the option you recommend, and "
-        "notify the maintainer."
+        f"started no builder. {first_step}, rewrite the issue to say what blocks it and the option you recommend, "
+        "and notify the maintainer."
     )
 
 
