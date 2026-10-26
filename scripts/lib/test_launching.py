@@ -499,20 +499,17 @@ class NestedRepositoryTest(unittest.TestCase):
             plant_hook(self.main / ".git" / "hooks" / event, self.marker)
             run_git(self.main, "config", "--add", "hook.tests.event", event)
 
-    def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
-        # The five events whose hooks a save ran, when hooks were set for every event.
-        events = ("prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push")
-        self.plant_main_hooks(*events)
+    def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved_or_a_successor_checks_it_out(self):
+        # The five events whose hooks a save ran, when hooks were set for every event, and a successor's checkout.
+        self.plant_main_hooks(
+            "prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push", "post-checkout"
+        )
         self.assertEqual(launching.save_work(self.worktree), "")
         self.assertIn("new.py", self.committed())
         self.assertFalse(self.marker.exists())
-
-    def test_the_main_checkouts_hooks_dont_run_when_a_successor_checks_out_the_work(self):
-        self.assertEqual(launching.save_work(self.worktree), "")
         successor = self.root / "successor"
         with mock.patch.dict(launching.git.__kwdefaults__, {"cwd": self.main}):
             launching.remove_worktree(self.worktree)
-            self.plant_main_hooks("post-checkout")
             launching.add_branch_worktree(successor, 1, continues=True)
         self.assertTrue((successor / "new.py").exists())
         self.assertFalse(self.marker.exists())
