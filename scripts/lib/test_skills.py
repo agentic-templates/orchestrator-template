@@ -9,6 +9,8 @@ import usage
 CHECKOUT = Path(__file__).resolve().parents[2]
 SKILLS = CHECKOUT / ".agents" / "skills"
 AGENT_FILES = sorted((CHECKOUT / ".claude" / "agents").glob("*.md"))
+# The section of AGENTS.md that lists the skills, where agents find the ones their type doesn't preload.
+READ_THE_SKILLS = "Read the skills"
 
 
 def skill_names() -> list[str]:
@@ -41,9 +43,9 @@ def names_skill(text: str, skill: str) -> bool:
 
 
 class PreloadTest(unittest.TestCase):
-    def test_each_agent_type_preloads_every_skill_that_its_preloaded_skills_or_agent_file_name(self):
+    def test_each_agent_type_preloads_the_skills_named_in_its_skills_and_agent_file(self):
         names = skill_names()
-        not_preloaded_by: dict[tuple[str, str], list[str]] = {}
+        agent_files_by_mention: dict[tuple[str, str], list[str]] = {}
         for agent_file in AGENT_FILES:
             preloaded = preloaded_skills(agent_file.stem)
             texts = {
@@ -55,12 +57,12 @@ class PreloadTest(unittest.TestCase):
             for path, text in texts.items():
                 for skill in names:
                     if skill not in preloaded and names_skill(text, skill):
-                        not_preloaded_by.setdefault((path, skill), []).append(agent_file.name)
+                        agent_files_by_mention.setdefault((path, skill), []).append(agent_file.name)
         problems = [
             f"`{path}` names the `{skill}` skill, which isn't in the `skills:` of "
             f"{', '.join(f'`.claude/agents/{name}`' for name in agent_file_names)}. Add it there, or take the mention "
             f"out of `{path}`."
-            for (path, skill), agent_file_names in not_preloaded_by.items()
+            for (path, skill), agent_file_names in agent_files_by_mention.items()
         ]
         self.assertEqual(problems, [])
 
@@ -79,13 +81,19 @@ class PreloadTest(unittest.TestCase):
         preloaded = {skill for agent_file in AGENT_FILES for skill in preloaded_skills(agent_file.stem)}
         agents_md = (CHECKOUT / "AGENTS.md").read_text()
         self.assertTrue(
-            "## Read the skills\n" in agents_md, 'This test reads the list in AGENTS.md\'s "Read the skills".'
+            f"## {READ_THE_SKILLS}\n" in agents_md,
+            f'AGENTS.md has no "## {READ_THE_SKILLS}" heading, and this test reads the list under it. Restore the '
+            "heading, or change the one this test looks for.",
         )
-        listed = set(re.findall(r"^- `([^`]+)`", section(agents_md, "Read the skills"), re.MULTILINE))
+        listed = set(re.findall(r"^- `([^`]+)`", section(agents_md, READ_THE_SKILLS), re.MULTILINE))
         problems = [
-            f'No agent type preloads `{skill}`, and the section "Read the skills" in AGENTS.md doesn\'t list it, so no '
-            "agent finds it. Add it to that section, or to the `skills:` of the agent types that need it."
+            f'No agent type preloads `{skill}`, and the section "{READ_THE_SKILLS}" in AGENTS.md doesn\'t list it, so '
+            "no agent finds it. Add it to that section, or to the `skills:` of the agent types that need it."
             for skill in skill_names()
             if skill not in preloaded and skill not in listed
         ]
         self.assertEqual(problems, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
