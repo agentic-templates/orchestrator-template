@@ -498,7 +498,7 @@ def agent_config(agent_type: str) -> str:
 
 
 def orchestrator_skills(provider: str) -> list[str]:
-    """The skills that the session-start hook gives the orchestrator on the provider."""
+    """The skills that the session-start hook gives an orchestrator that runs on the provider."""
     return ["orchestrator", f"orchestrator-{provider}"]
 
 
