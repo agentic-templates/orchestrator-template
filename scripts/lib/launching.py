@@ -87,8 +87,8 @@ HOOK_EVENTS = (
     "applypatch-msg", "pre-applypatch", "post-applypatch", "pre-commit", "pre-merge-commit", "prepare-commit-msg",
     "commit-msg", "post-commit", "pre-rebase", "post-checkout", "post-merge", "pre-push", "pre-receive", "update",
     "proc-receive", "post-receive", "post-update", "reference-transaction", "push-to-checkout", "pre-auto-gc",
-    "post-rewrite", "sendemail-validate", "fsmonitor-watchman", "p4-changelist", "p4-prepare-changelist", "p4-post-changelist",
-    "p4-pre-submit", "post-index-change",
+    "post-rewrite", "sendemail-validate", "fsmonitor-watchman", "p4-changelist", "p4-prepare-changelist",
+    "p4-post-changelist", "p4-pre-submit", "post-index-change",
 )  # fmt: skip
 # Git outside the sandbox would run code that an agent controls: programs that a nested repository's config names,
 # and the maintainer's hooks, such as a pre-push hook that runs the tests on the agent's work. These settings stop
