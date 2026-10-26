@@ -78,7 +78,9 @@ class PreloadTest(unittest.TestCase):
     def test_agents_md_lists_each_skill_that_no_agent_type_preloads(self):
         preloaded = {skill for agent_file in AGENT_FILES for skill in preloaded_skills(agent_file.stem)}
         agents_md = (CHECKOUT / "AGENTS.md").read_text()
-        self.assertIn("## Read the skills\n", agents_md, 'This test reads the list in AGENTS.md\'s "Read the skills".')
+        self.assertTrue(
+            "## Read the skills\n" in agents_md, 'This test reads the list in AGENTS.md\'s "Read the skills".'
+        )
         listed = set(re.findall(r"^- `([^`]+)`", section(agents_md, "Read the skills"), re.MULTILINE))
         problems = [
             f'No agent type preloads `{skill}`, and the section "Read the skills" in AGENTS.md doesn\'t list it, so no '
