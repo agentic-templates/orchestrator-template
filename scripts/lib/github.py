@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from functools import cache
+from typing import Any
 
 WRITE_ACCESS = ("admin", "maintain", "write")
 
@@ -15,7 +16,7 @@ def gh(*args: str) -> str:
     return result.stdout.strip()
 
 
-def gh_json(*args: str) -> object:
+def gh_json(*args: str) -> Any:
     output = gh(*args)
     return json.loads(output) if output else None
 

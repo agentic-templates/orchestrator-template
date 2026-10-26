@@ -12,11 +12,9 @@ import launching
 import meter
 import usage
 
-ACCOUNTS = [
-    usage.Account("claude", "claude", None),
-    usage.Account("claude-2", "claude", "~/.claude-2"),
-    usage.Account("codex", "codex", None),
-]
+CLAUDE = usage.Account("claude", "claude", None)
+CLAUDE_2 = usage.Account("claude-2", "claude", "~/.claude-2")
+ACCOUNTS = [CLAUDE, CLAUDE_2, usage.Account("codex", "codex", None)]
 
 
 def decisions(claude_room: int, claude_2_room: int, codex_room: int = 5) -> dict[str, meter.Decision]:
@@ -29,7 +27,7 @@ def decisions(claude_room: int, claude_2_room: int, codex_room: int = 5) -> dict
 class ChooseAccountTest(unittest.TestCase):
     def test_a_requested_account_with_room_is_used(self):
         account, _ = launching.choose_account(decisions(1, 3), ACCOUNTS, "claude", force=False)
-        self.assertEqual(account.name, "claude")
+        self.assertEqual(account, CLAUDE)
 
     def test_a_requested_account_without_room_is_refused_with_the_meter_report(self):
         account, reason = launching.choose_account(decisions(0, 3), ACCOUNTS, "claude", force=False)
@@ -39,11 +37,11 @@ class ChooseAccountTest(unittest.TestCase):
 
     def test_force_starts_on_a_requested_account_without_room(self):
         account, _ = launching.choose_account(decisions(0, 0, 0), ACCOUNTS, "claude", force=True)
-        self.assertEqual(account.name, "claude")
+        self.assertEqual(account, CLAUDE)
 
     def test_without_a_request_the_account_with_room_is_used(self):
         account, _ = launching.choose_account(decisions(0, 2), ACCOUNTS, None, force=False)
-        self.assertEqual(account.name, "claude-2")
+        self.assertEqual(account, CLAUDE_2)
 
     def test_without_a_request_an_account_the_launcher_cant_start_isnt_used(self):
         account, _ = launching.choose_account(decisions(0, 0, codex_room=5), ACCOUNTS, None, force=False)
@@ -573,7 +571,7 @@ class HandleTest(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.note = Path(folder.name) / "issue-7.md"
         self.note.write_text("Left: the tests.")
-        self.session = launching.Session("builder-7-abc", "id", "claude", Path(folder.name), None, Path())
+        self.session = launching.Session("builder-7-abc", "id", "claude", Path(folder.name), mock.MagicMock(), Path())
         self.session.note = self.note
 
     def test_the_note_is_kept_until_the_agent_answers(self):
@@ -604,7 +602,7 @@ class IsDoneTest(unittest.TestCase):
     """An agent that has reported."""
 
     def setUp(self):
-        self.session = launching.Session("builder-7-abc", "id", "claude", Path(), None, Path())
+        self.session = launching.Session("builder-7-abc", "id", "claude", Path(), mock.MagicMock(), Path())
         launching.handle(self.session, b'{"type": "result", "result": "Done."}')
 
     def go_quiet(self):
@@ -675,7 +673,7 @@ class CollectNoteTest(unittest.TestCase):
 
     def test_text_that_isnt_utf_8_is_kept_readable(self):
         (self.worktree / ".loop" / "handoff.md").write_bytes(b"\xff\xfeLeft: the tests.")
-        self.assertTrue(self.collected().endswith("Left: the tests."))
+        self.assertTrue((self.collected() or "").endswith("Left: the tests."))
 
     def test_a_folder_swapped_for_a_link_while_the_note_is_read_keeps_the_other_file(self):
         (self.worktree / ".loop" / "handoff.md").write_text("Left: the tests.")

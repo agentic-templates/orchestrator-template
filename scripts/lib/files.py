@@ -13,7 +13,7 @@ UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
 # Comments and attributes that make a linter or a type checker skip code, in the common languages.
 # Each must give its reason, starting with "because", on its own line or the line above.
 SUPPRESSION = re.compile(
-    r"#\s*no" + r"qa\b|#\s*type:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
+    r"#\s*no" + r"qa\b|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
     r"|@ts-(ignore|expect-error|nocheck)|biome-ignore|//\s*nolint|#!?\[allow\(|@SuppressWarnings"
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
 )

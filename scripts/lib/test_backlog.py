@@ -1,4 +1,5 @@
 import unittest
+from collections.abc import Iterable
 
 from backlog import Issue, agent_type, ready
 
@@ -8,7 +9,7 @@ def issue(number: int, *labels: str, by_maintainer: bool = True, blockers: tuple
 
 
 class ReadyTest(unittest.TestCase):
-    def numbers(self, issues: list[Issue], in_progress: set[int] = frozenset()) -> list[int]:
+    def numbers(self, issues: list[Issue], in_progress: Iterable[int] = ()) -> list[int]:
         return [item.number for item in ready(issues, set(in_progress))]
 
     def test_lists_the_oldest_issues_first(self):

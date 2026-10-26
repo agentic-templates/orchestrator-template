@@ -109,7 +109,9 @@ def next_account(result: dict[str, meter.Decision], accounts: list[usage.Account
     orchestrator = usage.orchestrator_account()
     launchable = {account.name for account in accounts if account.provider in LAUNCHABLE_PROVIDERS}
     open_accounts = [name for name, decision in result.items() if decision.room and name in launchable]
-    return min(open_accounts, key=lambda name: (name == orchestrator, result[name].used), default=None)
+    if not open_accounts:
+        return None
+    return min(open_accounts, key=lambda name: (name == orchestrator, result[name].used))
 
 
 def report_line(name: str, d: meter.Decision) -> str:

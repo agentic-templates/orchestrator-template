@@ -169,7 +169,7 @@ def record_context_windows(account: str, model_usage: dict) -> None:
         write_atomically(CONTEXT_WINDOWS, json.dumps(known | {account: windows | reported}))
 
 
-def context_window(account: str, model: str | None) -> int | None:
+def context_window(account: str | None, model: str | None) -> int | None:
     """The model's context window on the account, once an agent's turn on it there has ended."""
     known = json.loads(CONTEXT_WINDOWS.read_text()) if CONTEXT_WINDOWS.exists() else {}
     return known.get(account, {}).get(model)
@@ -230,6 +230,7 @@ def codex_rate_limits(account: Account) -> dict[str, dict]:
         text=True,
     )
     try:
+        assert server.stdin is not None
         for request in (
             {
                 "jsonrpc": "2.0",
@@ -249,9 +250,11 @@ def codex_rate_limits(account: Account) -> dict[str, dict]:
 
 
 def read_rate_limits(server: subprocess.Popen) -> dict[str, dict]:
+    stdout = server.stdout
+    assert stdout is not None
     deadline = time.time() + 30
-    while time.time() < deadline and select.select([server.stdout], [], [], 1)[0]:
-        line = server.stdout.readline()
+    while time.time() < deadline and select.select([stdout], [], [], 1)[0]:
+        line = stdout.readline()
         message = json.loads(line) if line.startswith("{") else {}
         if message.get("id") == 2:
             limits = message.get("result", {}).get("rateLimits", message.get("result", {}))

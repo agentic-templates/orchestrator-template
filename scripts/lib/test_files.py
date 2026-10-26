@@ -24,6 +24,7 @@ class CheckTextTest(unittest.TestCase):
         self.assertEqual(messages("a.py", f"def f():  {noqa}, because each branch reads one field\n"), [])
         self.assertEqual(messages("a.rs", "// Allowed because the parser needs every case.\n#[allow(clippy::x)]\n"), [])
         self.assertEqual(len(messages("a.ts", "// eslint-" + "disable-next-line no-console\n")), 1)
+        self.assertEqual(len(messages("a.py", "x = f()  # t" + "y: ignore[invalid-assignment]\n")), 1)
 
     def test_limits_the_size_of_skills_only(self):
         text = "word " * 2_500
