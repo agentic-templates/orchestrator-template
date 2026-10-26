@@ -49,11 +49,27 @@ REVIEW_TOOLS = [
         ["uvx", "complexipy@8.0.1", "--max-complexity-allowed", "15", "--failed", "--plain", *COMPLEXIPY_DEFAULTS],
     ),
 ]
-# Each test command runs once when the branch changes a file of its kind.
+# Each test command runs once when the branch changes a file of its kind. PYTHONSAFEPATH keeps a project's own
+# modules, such as a signal.py at its root, from hiding the standard library's from the loop's tests and the processes
+# they start.
 TESTS = [
     (
         "loop-python",
-        ["uv", "run", "--no-project", "--python", "3.12", "python", "-m", "unittest", "discover", "-s", "scripts/lib"],
+        [
+            "env",
+            "PYTHONSAFEPATH=1",
+            "uv",
+            "run",
+            "--no-project",
+            "--python",
+            "3.12",
+            "python",
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            "scripts/lib",
+        ],
     ),
 ]
 # The type checker ty runs with the tests, on every loop-python file, because a change can break a caller in a file it
