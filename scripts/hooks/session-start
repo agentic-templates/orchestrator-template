@@ -107,7 +107,7 @@ def main() -> None:
         return
     if sys.argv[1] == "skills":
         take_over(sys.argv[2])
-        context = skill("orchestrator") + "\n\n" + skill(f"orchestrator-{sys.argv[2]}")
+        context = "\n\n".join(skill(name) for name in usage.orchestrator_skills(sys.argv[2]))
         if not os.environ.get("LOOP_ORCHESTRATE"):
             respond(NOT_ORCHESTRATED_CONTEXT + "\n\n" + context, NOT_ORCHESTRATED)
             return

@@ -497,6 +497,11 @@ def agent_config(agent_type: str) -> str:
     return f"{fields.get('model', 'default')}/{fields.get('effort', 'default')}"
 
 
+def orchestrator_skills(provider: str) -> list[str]:
+    """The skills that the session-start hook gives the orchestrator on the provider."""
+    return ["orchestrator", f"orchestrator-{provider}"]
+
+
 def agent_skills(agent_type: str) -> list[str]:
     """The skills that an agent type preloads, from its definition."""
     skills = agent_fields(agent_type).get("skills", "")
