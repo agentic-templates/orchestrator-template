@@ -194,7 +194,7 @@ def builder_sessions(records: list[dict], issue: int, since: float = 0.0) -> int
 
 
 def restarted_at(events: list[dict]) -> float:
-    """When the maintainer last gave the issue a fresh set of builder sessions, by removing its waiting label or by
+    """When the maintainer last gave the issue a fresh set of builder sessions, by removing needs-decision or by
     reopening it, in seconds since the epoch, or 0 if never."""
     times = [
         datetime.fromisoformat(event["created_at"]).timestamp()
