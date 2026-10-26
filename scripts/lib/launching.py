@@ -93,8 +93,8 @@ HOOK_EVENTS = (
 # Git outside the sandbox would run code that an agent controls. A nested repository's config can name programs. And the
 # maintainer's hooks run on the agent's work, such as a pre-push hook that runs the tests, or a post-checkout hook that
 # installs the work's dependencies. These settings stop every hook and a nested repository's fsmonitor. They don't stop
-# its filters, which git runs on a file's content as it reads the file. And `ignore = none` in .gitmodules makes `git
-# status` read a nested repository, filters included, despite diff.ignoreSubmodules. So callers also leave what
+# its filters, which git runs on a file's content as it reads the file. And `ignore = none` in .gitmodules makes
+# `git status` read a nested repository, filters included, despite diff.ignoreSubmodules. So callers also leave what
 # nested_repositories() finds out of `git status` and `git add`.
 SAFE_GIT = (
     "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "diff.ignoreSubmodules=all",
