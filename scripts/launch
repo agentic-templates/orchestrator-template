@@ -100,6 +100,9 @@ def main() -> int:
         return 2
     if arguments.resume:
         return resume(arguments)
+    if launching.builds(arguments.agent_type) and (refusal := launching.builder_refusal(arguments.number)):
+        print(refusal)
+        return 2
     decisions = metering.decisions()
     account, reason = launching.choose_account(decisions, usage.accounts(), arguments.account, arguments.force)
     if account is None:

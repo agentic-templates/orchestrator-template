@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import contexts
@@ -58,6 +59,11 @@ MCP_JSON = ROOT / ".mcp.json"
 # An MCP server's command runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the
 # agents' uv cache.
 SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
+# An issue that has needed this many builder sessions is probably stuck on something only the maintainer can settle,
+# and each new session first rereads the issue and the code.
+BUILDER_SESSIONS_CAP = 10
+# The label of an issue that waits for the maintainer to answer the question it states.
+WAITING_LABEL = "needs-decision"
 
 
 @dataclass
@@ -148,6 +154,56 @@ def built(record: dict) -> bool:
     """Whether the agent of a launch record builds. A record without the answer counts as a builder's, so that its
     work is kept."""
     return record.get("builds", True)
+
+
+def builder_refusal(issue: int) -> str:
+    """Why no builder may start on the issue, or nothing if one may. At the cap it labels the issue as waiting for
+    the maintainer."""
+    labels = github.gh_json("issue", "view", str(issue), "--json", "labels", "--jq", "[.labels[].name]")
+    if WAITING_LABEL in labels:
+        return (
+            f"Issue #{issue} waits for the maintainer's decision ({WAITING_LABEL}), so the launcher started no "
+            "builder. Once the maintainer has answered, write the answer in the issue and remove the label. If the "
+            "issue stays open, start it again."
+        )
+    records = usage.agent_records()
+    if builder_sessions(records, issue) < BUILDER_SESSIONS_CAP:
+        return ""
+    # Reading the issue's events is a second GitHub call, so it waits until the count over all the records reaches
+    # the cap, which the count since a restart never exceeds.
+    pages = github.gh_json("api", "--paginate", "--slurp", f"repos/{github.repository()}/issues/{issue}/events")
+    events = [event for page in pages for event in page]
+    if builder_sessions(records, issue, since=restarted_at(events)) < BUILDER_SESSIONS_CAP:
+        return ""
+    github.gh("issue", "edit", str(issue), "--add-label", WAITING_LABEL)
+    note = note_path(issue)
+    read = (
+        f"Read its hand-off note in {note.relative_to(ROOT)}"
+        if note.exists()
+        else "Read the issue and its branch's commits"
+    )
+    return (
+        f"Issue #{issue} has had many builder sessions, so the launcher labelled it {WAITING_LABEL} and started no "
+        f"builder. {read}, write in the issue what blocks it and the option you recommend, and notify the maintainer."
+    )
+
+
+def builder_sessions(records: list[dict], issue: int, since: float = 0.0) -> int:
+    """How many builder sessions the records show for the issue, counting only those started after `since`, in
+    seconds since the epoch."""
+    return sum(1 for record in records if built(record) and record["number"] == issue and record["started"] > since)
+
+
+def restarted_at(events: list[dict]) -> float:
+    """When the maintainer last gave the issue a fresh set of builder sessions, by removing its waiting label or by
+    reopening it, in seconds since the epoch, or 0 if never."""
+    times = [
+        datetime.fromisoformat(event["created_at"]).timestamp()
+        for event in events
+        if event["event"] == "reopened"
+        or (event["event"] == "unlabeled" and event.get("label", {}).get("name") == WAITING_LABEL)
+    ]
+    return max(times, default=0.0)
 
 
 def busy_worktree(path: Path, branch: str, running: list[dict]) -> str:

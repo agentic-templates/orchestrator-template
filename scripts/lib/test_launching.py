@@ -509,6 +509,81 @@ class BuiltTest(unittest.TestCase):
         self.assertTrue(launching.built({"name": "builder-old"}))
 
 
+def builder_records(issue: int, count: int, started: float = 1_000.0) -> list[dict]:
+    return [{"id": f"builder-{issue}-{n}", "number": issue, "builds": True, "started": started} for n in range(count)]
+
+
+class BuilderRefusalTest(unittest.TestCase):
+    """Launches of builders on issue 5, which already had some builder sessions."""
+
+    def refusal(
+        self, records: list[dict], labels: tuple[str, ...] = (), events: tuple[dict, ...] = ()
+    ) -> tuple[str, list]:
+        """The refusal, and the gh commands that the launcher ran to change GitHub."""
+
+        def gh_json(*args: str):
+            return [list(events)] if args[0] == "api" else list(labels)
+
+        with (
+            mock.patch.object(launching.github, "gh_json", side_effect=gh_json),
+            mock.patch.object(launching.github, "gh") as gh,
+            mock.patch.object(launching.github, "repository", return_value="owner/project"),
+            mock.patch.object(launching.usage, "agent_records", return_value=records),
+        ):
+            return launching.builder_refusal(5), [call.args for call in gh.call_args_list]
+
+    def test_an_issue_waiting_for_the_maintainer_gets_no_builder(self):
+        refusal, changes = self.refusal([], labels=("needs-decision",))
+        self.assertIn("Issue #5 waits for the maintainer's decision", refusal)
+        self.assertEqual(changes, [])
+
+    def test_a_builder_starts_below_the_cap(self):
+        records = builder_records(5, launching.BUILDER_SESSIONS_CAP - 1)
+        self.assertEqual(self.refusal(records), ("", []))
+
+    def test_at_the_cap_the_issue_is_labelled_and_gets_no_builder(self):
+        refusal, changes = self.refusal(builder_records(5, launching.BUILDER_SESSIONS_CAP))
+        self.assertIn("Issue #5 has had many builder sessions", refusal)
+        self.assertIn("Read the issue and its branch's commits", refusal)
+        self.assertEqual(changes, [("issue", "edit", "5", "--add-label", "needs-decision")])
+
+    def test_at_the_cap_the_orchestrator_is_sent_to_the_hand_off_note(self):
+        with tempfile.TemporaryDirectory() as folder:
+            handoff = Path(folder) / ".loop" / "handoff"
+            handoff.mkdir(parents=True)
+            (handoff / "issue-5.md").write_text("Stuck on the API's limits.\n")
+            with mock.patch.object(launching, "ROOT", Path(folder)), mock.patch.object(usage, "HANDOFF", handoff):
+                refusal, _ = self.refusal(builder_records(5, launching.BUILDER_SESSIONS_CAP))
+        self.assertIn("Read its hand-off note in .loop/handoff/issue-5.md", refusal)
+
+    def test_only_sessions_since_the_label_was_removed_count(self):
+        records = builder_records(5, launching.BUILDER_SESSIONS_CAP, started=1_000.0) + builder_records(5, 1, 3_000.0)
+        removed = {"event": "unlabeled", "label": {"name": "needs-decision"}, "created_at": "1970-01-01T00:33:20Z"}
+        self.assertEqual(self.refusal(records, events=(removed,)), ("", []))
+
+    def test_only_sessions_since_the_issue_was_reopened_count(self):
+        records = builder_records(5, launching.BUILDER_SESSIONS_CAP, started=1_000.0)
+        reopened = {"event": "reopened", "created_at": "1970-01-01T00:33:20Z"}
+        self.assertEqual(self.refusal(records, events=(reopened,)), ("", []))
+
+    def test_only_sessions_since_the_latest_restart_count(self):
+        records = builder_records(5, launching.BUILDER_SESSIONS_CAP, started=3_000.0) + builder_records(5, 1, 5_000.0)
+        removed = {"event": "unlabeled", "label": {"name": "needs-decision"}, "created_at": "1970-01-01T00:33:20Z"}
+        reopened = {"event": "reopened", "created_at": "1970-01-01T01:06:40Z"}
+        self.assertEqual(self.refusal(records, events=(removed, reopened)), ("", []))
+
+    def test_removing_another_label_doesnt_restart_the_count(self):
+        records = builder_records(5, launching.BUILDER_SESSIONS_CAP, started=1_000.0)
+        removed = {"event": "unlabeled", "label": {"name": "bug"}, "created_at": "1970-01-01T00:33:20Z"}
+        refusal, _ = self.refusal(records, events=(removed,))
+        self.assertIn("Issue #5 has had many builder sessions", refusal)
+
+    def test_other_issues_and_agents_that_dont_build_dont_count(self):
+        reviewers = [{**record, "builds": False} for record in builder_records(5, launching.BUILDER_SESSIONS_CAP)]
+        records = reviewers + builder_records(6, launching.BUILDER_SESSIONS_CAP)
+        self.assertEqual(self.refusal(records), ("", []))
+
+
 class BusyWorktreeTest(unittest.TestCase):
     def test_a_stopped_agents_worktree_can_be_freed(self):
         self.assertEqual(launching.busy_worktree(launching.WORKTREES / "builder-7-abc", "issue-7", running=[]), "")
