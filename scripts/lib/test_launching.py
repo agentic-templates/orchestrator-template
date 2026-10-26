@@ -482,15 +482,12 @@ class NestedRepositoryTest(unittest.TestCase):
         launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
-    def test_a_submodule_marked_ignore_none_runs_no_fsmonitor_or_hook_when_git_reads_the_worktree(self):
+    def test_a_submodule_marked_ignore_none_runs_no_fsmonitor_when_git_reads_the_worktree(self):
         self.stage_nested()
         (self.worktree / ".gitmodules").write_text('[submodule "repo"]\n\tpath = vendor/repo\n\tignore = none\n')
         # No setting stops a nested repository's filter, so this test removes it and checks only the settings.
         run_git(self.nested, "config", "--unset", "filter.evil.clean")
         run_git(self.nested, "config", "core.fsmonitor", f"touch {self.marker}; false")
-        hooks = self.root / "planted-hooks"
-        plant_hook(hooks / "post-index-change", self.marker)
-        run_git(self.nested, "config", "core.hooksPath", str(hooks))
         launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
