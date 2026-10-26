@@ -57,5 +57,4 @@ A comment gives what a later editor needs to know before they change the line: a
 
 ## Keep the checks fast
 
-- Run a test only when a change touches what it tests.
 - Move slow tests of the product as a whole, such as end-to-end tests, into a command that CI runs after each merge.
