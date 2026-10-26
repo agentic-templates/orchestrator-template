@@ -41,7 +41,7 @@ The skills in `.agents/skills/` hold the rules for each kind of work. Read a ski
 
 ## Commands
 
-- `scripts/check`: runs the checks on the files that your branch changes. `scripts/check --all` runs them on every file, as CI does.
+- `scripts/check`: runs the formatters and linters on the files that your branch changes, and the tests and type checkers on the whole project. `scripts/check --all` runs them on every file, as CI does.
 
 ## Make a change
 

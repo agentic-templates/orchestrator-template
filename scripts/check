@@ -2,7 +2,8 @@
 # /// script
 # requires-python = ">=3.12"
 # ///
-"""Runs the checks on the files that the branch changes, or on every file with --all, as CI does.
+"""Runs the formatters and linters on the files that the branch changes, or on every file with --all, and the tests and
+type checkers on the whole project.
 
 usage: scripts/check [--all] [--base <commit>] [--review]
 
@@ -11,7 +12,8 @@ uncommitted and untracked files. With --review, it lists what a reviewer should 
 that are hard to follow, and doesn't fail. Each check prints "<file>:<line>: <what to do>". The exit status is 1
 when any check fails.
 
-To add a language, add its tools to TOOLS, as the `languages` skill describes.
+To add a language, add its formatter and linter to TOOLS and its type checker and tests to TESTS, as the `languages`
+skill describes.
 """
 
 import argparse
@@ -86,28 +88,25 @@ REVIEW_TOOLS = [
         ],
     ),
 ]
-# Each test command runs once when the branch changes a file of its kind. PYTHONSAFEPATH stops Python from putting the
-# current folder first on its import path. Without it, a project's own module, such as a signal.py at the repository's
-# root, replaces the standard library's module of the same name in the loop's tests and the processes they start.
+# Each command runs once at every check, on the whole project. PYTHONSAFEPATH stops Python from putting the current
+# folder first on its import path. Without it, a project's own module, such as a signal.py at the repository's root,
+# replaces the standard library's module of the same name in the loop's tests and the processes they start.
 TESTS = [
-    (
-        "loop-python",
-        [
-            "env",
-            "PYTHONSAFEPATH=1",
-            "uv",
-            "run",
-            "--no-project",
-            "--python",
-            "3.12",
-            "python",
-            "-m",
-            "unittest",
-            "discover",
-            "-s",
-            "scripts/lib",
-        ],
-    ),
+    [
+        "env",
+        "PYTHONSAFEPATH=1",
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        "3.12",
+        "python",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/lib",
+    ],
 ]
 # The type checker ty runs with the tests, on every loop-python file, because a change can break a caller in a file it
 # doesn't touch. It gets the files by name, because in a folder it skips the files without .py. --project scripts makes
@@ -177,14 +176,14 @@ def run_tools(paths: list[str], tools: list = TOOLS, tests: list = TESTS) -> boo
             passed = False
             if tool.hint:
                 print(tool.hint, flush=True)
-    for wanted, command in tests:
-        if wanted in kinds.values() and subprocess.run(command, check=False, cwd=ROOT).returncode != 0:
+    for command in tests:
+        if subprocess.run(command, check=False, cwd=ROOT).returncode != 0:
             passed = False
     return passed
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--all", action="store_true", help="check every file")
     parser.add_argument("--base", help="count the changes from this commit")
     parser.add_argument("--review", action="store_true", help="list what a reviewer should judge, without failing")
@@ -196,7 +195,7 @@ def main() -> int:
     problems = check_files(paths)
     print("\n".join(problems), end="\n" if problems else "", flush=True)
     loop_python = [path for path in regular_files(git("ls-files", "scripts")) if kind(path) == "loop-python"]
-    tools_passed = run_tools(paths, tests=[*TESTS, ("loop-python", [*LOOP_TY, *loop_python])])
+    tools_passed = run_tools(paths, tests=[*TESTS, [*LOOP_TY, *loop_python]])
     return 0 if tools_passed and not problems else 1
 
 
