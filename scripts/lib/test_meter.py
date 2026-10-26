@@ -42,6 +42,7 @@ class Simulation:
     peak: float = 0.0
     wind_downs: int = 0
     last_start: float = -1.0
+    last_stop: float = -math.inf
 
     def run(self, minutes: int = WINDOW, burn_change: tuple[int, float] | None = None) -> "Simulation":
         for minute in range(minutes):
@@ -71,8 +72,7 @@ class Simulation:
             return False
         if self.issues == 0:
             return True
-        last_stop = max((agent.stopped for agent in self.finished), default=-math.inf)
-        is_past_longest_burn_span = self.readings[-1].time - last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
+        is_past_longest_burn_span = self.readings[-1].time - self.last_stop >= max(meter.BURN_SPANS_MINUTES) * MINUTE
         return is_past_longest_burn_span and decision.action != "start"
 
     def read(self, minute: int, now: float) -> None:
@@ -99,6 +99,7 @@ class Simulation:
                 agent.stops_in -= 1
             if agent.minutes_left <= 0 or (agent.stops_in is not None and agent.stops_in <= 0):
                 agent.stopped = now + MINUTE
+                self.last_stop = agent.stopped
                 self.finished.append(agent)
         self.agents = [a for a in self.agents if a.stopped is None]
         self.peak = max(self.peak, self.used)

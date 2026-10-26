@@ -91,7 +91,7 @@ def maintainer_is_writing() -> bool:
 
 def is_abandoned(text: str) -> bool:
     """Whether the box has shown the same text for long enough. The time counts across senders."""
-    typed = json.loads(TYPED.read_text()) if TYPED.exists() else {}
+    typed: dict = json.loads(TYPED.read_text()) if TYPED.exists() else {}
     if typed.get("text") != text:
         typed = {"text": text, "since": time.time()}
         TYPED.write_text(json.dumps(typed))

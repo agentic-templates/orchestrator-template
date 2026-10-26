@@ -493,9 +493,11 @@ def is_done(session: Session) -> bool:
 
 
 def wait(session: Session, record: dict) -> str:
+    output = session.process.stdout
+    assert output is not None
     while session.process.poll() is None and not is_done(session):
-        if select.select([session.process.stdout], [], [], 5)[0]:
-            line = session.process.stdout.readline()
+        if select.select([output], [], [], 5)[0]:
+            line = output.readline()
             if line:
                 handle(session, line)
     return finish(session, "done")
