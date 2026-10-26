@@ -404,6 +404,12 @@ def run_git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
+def plant_hook(path: Path, marker: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    path.chmod(0o755)
+
+
 class NestedRepositoryTest(unittest.TestCase):
     """A builder's worktree, in which the agent made a nested repository whose config runs a program that leaves a
     marker, as an agent can from inside the sandbox."""
@@ -474,6 +480,26 @@ class NestedRepositoryTest(unittest.TestCase):
         self.stage_nested()
         run_git(self.nested, "config", "core.fsmonitor", f"touch {self.marker}; false")
         launching.worktree_git(self.worktree, "status", "--porcelain")
+        self.assertFalse(self.marker.exists())
+
+    def test_a_nested_repository_that_gitmodules_makes_git_read_runs_no_fsmonitor_or_hook(self):
+        self.stage_nested()
+        (self.worktree / ".gitmodules").write_text('[submodule "repo"]\n\tpath = vendor/repo\n\tignore = none\n')
+        # The settings don't stop a filter, which is why callers leave nested repositories out.
+        run_git(self.nested, "config", "--unset", "filter.evil.clean")
+        run_git(self.nested, "config", "core.fsmonitor", f"touch {self.marker}; false")
+        hooks = self.root / "planted-hooks"
+        plant_hook(hooks / "post-index-change", self.marker)
+        run_git(self.nested, "config", "core.hooksPath", str(hooks))
+        launching.worktree_git(self.worktree, "status", "--porcelain")
+        self.assertFalse(self.marker.exists())
+
+    def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
+        # Such as a pre-push hook that runs the project's tests, which would run the agent's code outside the sandbox.
+        for hook in ("post-commit", "pre-push"):
+            plant_hook(self.main / ".git" / "hooks" / hook, self.marker)
+        self.assertEqual(launching.save_work(self.worktree), "")
+        self.assertIn("new.py", self.committed())
         self.assertFalse(self.marker.exists())
 
     def test_a_worktree_with_only_a_nested_repository_has_no_changes(self):

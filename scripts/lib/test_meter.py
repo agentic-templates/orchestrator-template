@@ -175,6 +175,12 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(meter.decide({"5h": readings}, 600, waiting).action, "hold")
         self.assertEqual(meter.decide({"5h": readings}, 600, load(2)).action, "start")
 
+    def test_starts_no_agent_once_the_latest_reading_is_stale(self):
+        readings = [Reading(0, 50, 10_000), Reading(600, 51, 10_000)]
+        fresh_until = 600 + meter.STALE_MINUTES * MINUTE
+        self.assertEqual(meter.decide({"5h": readings}, fresh_until, load(1)).action, "start")
+        self.assertEqual(meter.decide({"5h": readings}, fresh_until + MINUTE, load(1)).action, "hold")
+
     def test_agents_that_started_after_the_readings_count_at_the_rate_of_those_in_them(self):
         # One agent used 0.5% a minute; two more started after the latest reading.
         readings = [Reading(0, 80, 10_000), Reading(600, 85, 10_000)]
@@ -193,6 +199,19 @@ class DecideTest(unittest.TestCase):
         readings = [Reading(0, 92, 10_000), Reading(300, 92, 10_000)]
         decision = meter.decide({"5h": readings}, 300, meter.Load(1, REACTION, 1.0, ((0.0, None),)))
         self.assertEqual((decision.action, decision.burn), ("hold", 0.2))
+
+    def test_use_that_hasnt_shown_counts_at_one_percent_over_the_longest_span_without_a_rise(self):
+        # Ten agents ran through readings, taken every five minutes, that didn't move for 20.
+        readings = [Reading(time, 95, 900_000) for time in range(0, 1_201, 300)]
+        runs = tuple((-5_000.0, None) for _ in range(10))
+        decision = meter.decide({"7d": readings}, 1_200, meter.Load(10, REACTION, 1.0, runs))
+        self.assertEqual((decision.action, decision.burn), ("start", 0.05))
+
+    def test_agents_count_at_the_rate_of_a_recent_rise(self):
+        # One agent used 1% in 15 minutes, then 2% in the next 5; two more started after the latest reading.
+        readings = [Reading(0, 88, 10_000), Reading(900, 89, 10_000), Reading(1_200, 91, 10_000)]
+        runs = ((-1_000.0, None), (1_250.0, None), (1_250.0, None))
+        self.assertEqual(meter.decide({"5h": readings}, 1_260, meter.Load(3, REACTION, 1.0, runs)).action, "pause")
 
     def test_after_a_pause_agents_count_at_the_rate_measured_before_it(self):
         # One agent used 0.5% a minute and stopped; 40 quiet minutes later, two agents started.
