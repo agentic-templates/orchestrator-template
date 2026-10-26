@@ -3,7 +3,8 @@
 from dataclasses import dataclass
 
 AGENT_FOR_LABEL = {"small": "builder-small", "deep": "builder-deep", "research": "researcher"}
-WAITING_LABELS = {"needs-decision", "needs-triage"}
+NEEDS_DECISION = "needs-decision"
+WAITING_LABELS = {NEEDS_DECISION, "needs-triage"}
 
 
 @dataclass(frozen=True)
