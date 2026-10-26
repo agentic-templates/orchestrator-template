@@ -404,7 +404,7 @@ def run_git(cwd: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout
 
 
-def plant_hook(path: Path, marker: Path) -> None:
+def install_hook(path: Path, marker: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f"#!/bin/sh\ntouch {marker}\n")
     path.chmod(0o755)
@@ -491,18 +491,18 @@ class NestedRepositoryTest(unittest.TestCase):
         launching.worktree_git(self.worktree, "status", "--porcelain")
         self.assertFalse(self.marker.exists())
 
-    def plant_main_hooks(self, *events: str) -> None:
+    def install_main_hooks(self, *events: str) -> None:
         """Hooks in the main checkout's hooks folder and in its git config, for the events."""
-        plant_hook(self.root / "hook", self.marker)
+        install_hook(self.root / "hook", self.marker)
         run_git(self.main, "config", "hook.tests.command", str(self.root / "hook"))
         for event in events:
-            plant_hook(self.main / ".git" / "hooks" / event, self.marker)
+            install_hook(self.main / ".git" / "hooks" / event, self.marker)
             run_git(self.main, "config", "--add", "hook.tests.event", event)
 
     def test_the_main_checkouts_hooks_dont_run_when_the_work_is_saved(self):
         # The five events whose hooks a save ran, when hooks were set for every event.
         events = ("prepare-commit-msg", "post-commit", "post-index-change", "reference-transaction", "pre-push")
-        self.plant_main_hooks(*events)
+        self.install_main_hooks(*events)
         self.assertEqual(launching.save_work(self.worktree), "")
         self.assertIn("new.py", self.committed())
         self.assertFalse(self.marker.exists())
@@ -512,7 +512,7 @@ class NestedRepositoryTest(unittest.TestCase):
         successor = self.root / "successor"
         with mock.patch.dict(launching.git.__kwdefaults__, {"cwd": self.main}):
             launching.remove_worktree(self.worktree)
-            self.plant_main_hooks("post-checkout")
+            self.install_main_hooks("post-checkout")
             launching.add_branch_worktree(successor, 1, continues=True)
         self.assertTrue((successor / "new.py").exists())
         self.assertFalse(self.marker.exists())
