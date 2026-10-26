@@ -9,7 +9,7 @@ description: How to add a language, a tool or a dependency to the project, with 
 
 1. Pin the version of the language and its package manager in the project's version files, and add their install to `.github/workflows/check.yml`.
 2. If the package manager can reject versions released less than 7 days ago, turn that on. In CI, install from the lockfile in the mode that fails when the lockfile is missing or out of date.
-3. Add the formatter and the linter to `TOOLS` in `scripts/check`, which runs them on the changed files. Add the type checker and the command that runs the tests to `TESTS`, which runs them on the whole project, because a change can break code in files it doesn't touch. Leave `scripts/` out of them, because `scripts/check` tests and type-checks the loop's scripts itself. Turn on these settings where the tools have them, for the tests as well as the code:
+3. Add the formatter and the linter to `TOOLS` in `scripts/check`, which runs them on the changed files. Add the type checker, if the language has one, and the command that runs the tests to `TESTS`, which runs them on the whole project, because a change can break code in files it doesn't touch. Leave `scripts/` out of them, because `scripts/check` tests and type-checks the loop's scripts itself. Turn on these settings where the tools have them, for the tests as well as the code:
    - the type checker's strict mode, or the compiler's setting that turns warnings into errors
    - rules against unused code
    - rules against code that ignores an error, such as an empty `catch` block or a promise that nothing awaits
