@@ -522,6 +522,18 @@ def builder_records(issue: int, count: int, started: float = 1_000.0) -> list[di
 class BuilderRefusalTest(unittest.TestCase):
     """Launches of builders on issue 5, which already had some builder sessions."""
 
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.handoff = Path(folder.name) / ".loop" / "handoff"
+        self.handoff.mkdir(parents=True)
+        for patch in (
+            mock.patch.object(launching, "ROOT", Path(folder.name)),
+            mock.patch.object(usage, "HANDOFF", self.handoff),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
     def refusal(
         self, records: list[dict], labels: tuple[str, ...] = (), events: tuple[dict, ...] = ()
     ) -> tuple[str, list]:
@@ -554,12 +566,8 @@ class BuilderRefusalTest(unittest.TestCase):
         self.assertEqual(changes, [("issue", "edit", "5", "--add-label", "needs-decision")])
 
     def test_at_the_cap_the_orchestrator_is_sent_to_the_hand_off_note(self):
-        with tempfile.TemporaryDirectory() as folder:
-            handoff = Path(folder) / ".loop" / "handoff"
-            handoff.mkdir(parents=True)
-            (handoff / "issue-5.md").write_text("Stuck on the API's limits.\n")
-            with mock.patch.object(launching, "ROOT", Path(folder)), mock.patch.object(usage, "HANDOFF", handoff):
-                refusal, _ = self.refusal(builder_records(5, launching.BUILDER_SESSIONS_CAP))
+        (self.handoff / "issue-5.md").write_text("Stuck on the API's limits.\n")
+        refusal, _ = self.refusal(builder_records(5, launching.BUILDER_SESSIONS_CAP))
         self.assertIn("Read its hand-off note in .loop/handoff/issue-5.md", refusal)
 
     def test_only_sessions_since_the_label_was_removed_count(self):

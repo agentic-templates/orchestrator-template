@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+import backlog
 import contexts
 import github
 import measurements
@@ -62,7 +63,6 @@ SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"
 # Set high, so that only an issue that builders can't finish reaches it, such as one stuck on a question only the
 # maintainer can settle. Each further session would reread the issue and the code for nothing.
 BUILDER_SESSIONS_CAP = 10
-NEEDS_DECISION = "needs-decision"
 
 
 @dataclass
@@ -159,10 +159,10 @@ def refuse_builder(issue: int) -> str:
     """Returns why no builder may start on the issue, or nothing if one may. At the cap it first labels the issue
     needs-decision."""
     labels = github.gh_json("issue", "view", str(issue), "--json", "labels", "--jq", "[.labels[].name]")
-    if NEEDS_DECISION in labels:
+    if backlog.NEEDS_DECISION in labels:
         return (
-            f"Issue #{issue} waits for the maintainer's decision ({NEEDS_DECISION}), so the launcher started no "
-            "builder. Once the maintainer has answered, rewrite the issue with the answer and remove the label. If "
+            f"Issue #{issue} waits for the maintainer's decision ({backlog.NEEDS_DECISION}), so the launcher started "
+            "no builder. Once the maintainer has answered, rewrite the issue with the answer and remove the label. If "
             "the issue stays open, launch a builder on it again."
         )
     records = usage.agent_records()
@@ -173,7 +173,7 @@ def refuse_builder(issue: int) -> str:
     events = [event for page in pages for event in page]
     if builder_sessions(records, issue, since=count_starts_at(events)) < BUILDER_SESSIONS_CAP:
         return ""
-    github.gh("issue", "edit", str(issue), "--add-label", NEEDS_DECISION)
+    github.gh("issue", "edit", str(issue), "--add-label", backlog.NEEDS_DECISION)
     note = note_path(issue)
     first_step = (
         f"Read its hand-off note in {note.relative_to(ROOT)}"
@@ -181,8 +181,9 @@ def refuse_builder(issue: int) -> str:
         else "Read the issue and its branch's commits"
     )
     return (
-        f"Issue #{issue} has had many builder sessions, so the launcher labelled it {NEEDS_DECISION} and started no "
-        f"builder. {first_step}, write in the issue what blocks it and the option you recommend, and notify the maintainer."
+        f"Issue #{issue} has had many builder sessions, so the launcher labelled it {backlog.NEEDS_DECISION} and "
+        f"started no builder. {first_step}, write in the issue what blocks it and the option you recommend, and "
+        "notify the maintainer."
     )
 
 
@@ -199,7 +200,7 @@ def count_starts_at(events: list[dict]) -> float:
         datetime.fromisoformat(event["created_at"]).timestamp()
         for event in events
         if event["event"] == "reopened"
-        or (event["event"] == "unlabeled" and event.get("label", {}).get("name") == NEEDS_DECISION)
+        or (event["event"] == "unlabeled" and event.get("label", {}).get("name") == backlog.NEEDS_DECISION)
     ]
     return max(times, default=0.0)
 
