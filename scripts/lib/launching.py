@@ -62,8 +62,7 @@ SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"
 # An issue that has needed this many builder sessions is probably stuck on something only the maintainer can settle,
 # and each new session first rereads the issue and the code.
 BUILDER_SESSIONS_CAP = 10
-# The label of an issue that waits for the maintainer to answer the question it states.
-WAITING_LABEL = "needs-decision"
+NEEDS_DECISION = "needs-decision"
 
 
 @dataclass
@@ -160,9 +159,9 @@ def builder_refusal(issue: int) -> str:
     """Why no builder may start on the issue, or nothing if one may. At the cap it labels the issue as waiting for
     the maintainer."""
     labels = github.gh_json("issue", "view", str(issue), "--json", "labels", "--jq", "[.labels[].name]")
-    if WAITING_LABEL in labels:
+    if NEEDS_DECISION in labels:
         return (
-            f"Issue #{issue} waits for the maintainer's decision ({WAITING_LABEL}), so the launcher started no "
+            f"Issue #{issue} waits for the maintainer's decision ({NEEDS_DECISION}), so the launcher started no "
             "builder. Once the maintainer has answered, write the answer in the issue and remove the label. If the "
             "issue stays open, start it again."
         )
@@ -175,7 +174,7 @@ def builder_refusal(issue: int) -> str:
     events = [event for page in pages for event in page]
     if builder_sessions(records, issue, since=restarted_at(events)) < BUILDER_SESSIONS_CAP:
         return ""
-    github.gh("issue", "edit", str(issue), "--add-label", WAITING_LABEL)
+    github.gh("issue", "edit", str(issue), "--add-label", NEEDS_DECISION)
     note = note_path(issue)
     read = (
         f"Read its hand-off note in {note.relative_to(ROOT)}"
@@ -183,7 +182,7 @@ def builder_refusal(issue: int) -> str:
         else "Read the issue and its branch's commits"
     )
     return (
-        f"Issue #{issue} has had many builder sessions, so the launcher labelled it {WAITING_LABEL} and started no "
+        f"Issue #{issue} has had many builder sessions, so the launcher labelled it {NEEDS_DECISION} and started no "
         f"builder. {read}, write in the issue what blocks it and the option you recommend, and notify the maintainer."
     )
 
@@ -201,7 +200,7 @@ def restarted_at(events: list[dict]) -> float:
         datetime.fromisoformat(event["created_at"]).timestamp()
         for event in events
         if event["event"] == "reopened"
-        or (event["event"] == "unlabeled" and event.get("label", {}).get("name") == WAITING_LABEL)
+        or (event["event"] == "unlabeled" and event.get("label", {}).get("name") == NEEDS_DECISION)
     ]
     return max(times, default=0.0)
 
