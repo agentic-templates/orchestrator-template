@@ -77,7 +77,8 @@ def resume(arguments: argparse.Namespace) -> int:
     if not worktree.exists():
         issue = record["number"] if launching.built(record) else None
         worktree = launching.make_worktree(record["id"], issue, continues=True)
-    session = launching.start(account, record["name"], record["id"], worktree, arguments.message, record["session"])
+    agent_type = launching.agent_type_from_main(record["name"])
+    session = launching.start(account, agent_type, record["id"], worktree, arguments.message, record["session"])
     if launching.built(record):
         session.note = launching.note_for(record["number"], continues=True)
     return run(session, {**record, "started": time.time(), "pid": os.getpid(), "worktree": str(worktree)})
@@ -136,8 +137,10 @@ def main() -> int:
         (usage.AGENTS / f"{agent_id}.json").unlink()
         raise
     note = launching.note_for(arguments.number, arguments.successor) if issue else None
+    # Read after the worktree's fetch, so that the agent gets main's latest instructions.
+    agent_type = launching.agent_type_from_main(arguments.agent_type)
     session = launching.start(
-        account, arguments.agent_type, agent_id, worktree, prompt_for(arguments, worktree, note), session_id
+        account, agent_type, agent_id, worktree, prompt_for(arguments, worktree, note), session_id
     )
     session.note = note
     return run(session, record)

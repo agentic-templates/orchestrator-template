@@ -6,10 +6,9 @@
 
 usage: scripts/hooks/write-guard <worktree>
 
-Claude Code's sandbox covers only commands, so without this hook an agent's file tools could write outside its
-worktree, such as a hook into the main checkout's settings, which every agent's hooks come from, or into the
-worktree's own git files, which the loop's git reads outside the sandbox. scripts/launch adds it to every agent's
-settings.
+Claude Code's sandbox covers only Bash commands. Without this hook, an agent's file tools could write outside its
+worktree, such as a hook into the main checkout's settings. They could also change the worktree's .git file, which
+the launcher's git reads outside the sandbox. launching.settings() adds the hook to every agent's settings.
 """
 
 import json
@@ -20,8 +19,10 @@ from pathlib import Path
 
 def refusal(path: str, worktree: str) -> str:
     """Why the file tools may not write to the path, or an empty string if they may."""
+    if not path:
+        return "The tool call names no file. Give the file's absolute path."
     if not os.path.isabs(path):
-        return f"{path} isn't an absolute path. Give the file's absolute path in your worktree, {worktree}."
+        return f"{path} isn't an absolute path. Give the file's absolute path, which starts with {worktree}/."
     # Resolved, so that a link in the worktree can't lead outside it.
     real = Path(os.path.realpath(path))
     root = Path(os.path.realpath(worktree))
@@ -29,7 +30,7 @@ def refusal(path: str, worktree: str) -> str:
         return f"{path} is outside your worktree, {worktree}. Write only to files in it."
     # macOS's file system ignores case by default, so .GIT is the same folder there.
     if any(part.lower() == ".git" for part in real.relative_to(root).parts):
-        return f"{path} is one of git's own files. Change it only with git commands."
+        return f"{path} is a .git file or in a .git folder. Change it only with git commands."
     return ""
 
 
@@ -42,4 +43,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        # Claude Code stops the tool call only when the hook exits with 2, so any other failure would let it write.
+        print(f"The write guard failed, so it refused the call: {error}. Say so in your report.", file=sys.stderr)
+        sys.exit(2)

@@ -474,9 +474,9 @@ def orchestrator_account() -> str | None:
     return orchestrator().get("account")
 
 
-def main_file(path: str) -> str | None:
+def main_text(path: str) -> str | None:
     """The file's text in the main commit that the launcher last fetched, or None if that commit has no such file.
-    Agents' instructions come from there rather than from the main checkout's files, which nothing updates, so that a
+    Agents' instructions come from there rather than from the main checkout's files, which may be older, so that a
     merged change to them reaches the next agent at once."""
     result = subprocess.run(
         ["git", "cat-file", "blob", f"origin/main:{path}"], cwd=ROOT, capture_output=True, text=True, check=False
@@ -485,36 +485,41 @@ def main_file(path: str) -> str | None:
 
 
 def without_front_matter(text: str) -> str:
+    """The text below the fields between a file's opening "---" lines."""
     return text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
 
 
-def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
-    """The fields at the top of an agent type's definition in .claude/agents/ on main, such as its model, or none if
-    main has no such agent type. A list written as lines that start with "-" comes as a list, and one written on one
-    line, such as "[building, code]", as text."""
-    definition = main_file(f".claude/agents/{agent_type}.md")
+def definition_fields(definition: str) -> dict[str, str | list[str]]:
+    """The fields between the opening "---" lines of an agent type's definition, such as its model. A list written
+    as lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
     fields: dict[str, str | list[str]] = {}
     key = ""
-    if definition:
-        for line in definition.split("---")[1].splitlines():
-            if line.strip().startswith("-") and key:
-                fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
-                continue
-            key, _, value = line.partition(":")
-            key = key.strip()
-            fields[key] = value.strip()
+    for line in definition.split("---")[1].splitlines():
+        if line.strip().startswith("-") and key:
+            fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        fields[key] = value.strip()
     return fields
 
 
-def agent_prompt(agent_type: str) -> str:
-    """The text below the fields of an agent type's definition on main."""
-    return without_front_matter(main_file(f".claude/agents/{agent_type}.md") or "")
+def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
+    """The fields of an agent type's definition in .claude/agents/ on main, or no fields if main has no such agent
+    type."""
+    definition = main_text(f".claude/agents/{agent_type}.md")
+    return definition_fields(definition) if definition else {}
 
 
-def as_list(value: str | list[str]) -> list[str]:
-    """A field's list, written either way that agent_fields reads."""
-    items = value.strip("[]").split(",") if isinstance(value, str) else value
+def as_list(field: str | list[str]) -> list[str]:
+    """The items of a field that holds a list, written either way that definition_fields reads."""
+    items = field.strip("[]").split(",") if isinstance(field, str) else field
     return [item.strip() for item in items if item.strip()]
+
+
+def preloaded_skills(fields: dict[str, str | list[str]]) -> list[str]:
+    """The skills that an agent type with these fields preloads."""
+    return as_list(fields.get("skills", ""))
 
 
 def agent_config(agent_type: str) -> str:
@@ -530,4 +535,4 @@ def orchestrator_skills(provider: str) -> list[str]:
 
 def agent_skills(agent_type: str) -> list[str]:
     """The skills that an agent type preloads, from its definition."""
-    return as_list(agent_fields(agent_type).get("skills", ""))
+    return preloaded_skills(agent_fields(agent_type))

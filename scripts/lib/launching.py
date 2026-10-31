@@ -58,9 +58,10 @@ SECRET_WORDS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIALS"}
 QUIET_SECONDS = 60
 # Read from the main checkout, because a branch could add a server to its own copy.
 MCP_JSON = ROOT / ".mcp.json"
-# An MCP server's command runs outside the sandbox, so it starts as the hooks do: in the main checkout, without the
-# agents' uv cache.
-SERVER_START = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
+WRITE_GUARD = ROOT / "scripts" / "hooks" / "write-guard"
+# A program that runs outside the sandbox for an agent, such as an MCP server or the write guard, starts as the hooks
+# do: in the main checkout, without the agents' uv cache.
+START_IN_MAIN = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
 # Set high, so that only an issue that builders can't finish reaches it, such as one stuck on a question only the
 # maintainer can settle. Each further session would reread the issue and the code for nothing.
 BUILDER_SESSIONS_CAP = 10
@@ -81,6 +82,16 @@ class Session:
     note: Path | None = None
     # The number of background commands and subagents that the session last reported as running.
     background_tasks: int = 0
+
+
+@dataclass(frozen=True)
+class AgentType:
+    """An agent type as main defines it, and the instructions that an agent of the type starts with."""
+
+    name: str
+    fields: dict[str, str | list[str]]
+    prompt: str
+    instructions: str
 
 
 def git(*args: str, cwd: Path = ROOT) -> str:
@@ -307,14 +318,14 @@ def holding(porcelain: str, branch: str) -> list[Path]:
 
 
 def settings(worktree: Path) -> str:
-    """The project's settings from the main checkout's files, for an agent that loads none from its worktree, where
-    it could add a hook that runs outside the sandbox. A git object can change those files only once someone updates
-    the main checkout, and an agent can write the git objects that its worktree shares with the main checkout.
+    """The project's settings, read from the main checkout's files, for an agent that loads no settings from its
+    worktree. An agent can rewrite the git objects that its worktree shares with the main checkout, so the settings,
+    whose hooks run outside the sandbox, don't come from git.
 
     The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and the agent
     can't ask to run a command outside it, because the allow rules would approve that without asking. The sandbox
-    covers only commands, so a hook keeps the file tools in the worktree, and the agent can't move its session to
-    another worktree."""
+    covers only Bash commands, so a hook keeps the file tools in the worktree. A deny rule keeps the session from
+    moving to another worktree."""
     project = json.loads((ROOT / ".claude" / "settings.json").read_text())
     sandbox = project["sandbox"] | {"allowUnsandboxedCommands": False}
     filesystem = sandbox.setdefault("filesystem", {})
@@ -325,38 +336,34 @@ def settings(worktree: Path) -> str:
     # A path that may be a file or a folder is denied both ways.
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
     deny = project["permissions"]["deny"]
-    # The project's rules for its own files, such as .env files, match only in the agent's worktree, which has none of
-    # those files. The maintainer's copies are in the main checkout.
-    rules += [rule for rule in map(in_main_checkout, deny) if rule]
+    # The project's rules for its own files, such as .env files, are given again for the main checkout, which holds
+    # the maintainer's copies, and for the worktree, because Claude Code reads a rule in --settings that starts with
+    # a slash as a path in a temporary folder.
+    for checkout in (ROOT, worktree):
+        rules += filter(None, (in_checkout(rule, checkout) for rule in deny))
     permissions = project["permissions"] | {"deny": [*deny, *rules, "EnterWorktree"]}
     credentials = sandbox.setdefault("credentials", {})
     credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]
     hooks = project.get("hooks", {})
-    guard = {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": write_guard(worktree)}]}
+    command = shlex.join(started_in_main([str(WRITE_GUARD), str(worktree)]))
+    guard = {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": command}]}
     hooks = hooks | {"PreToolUse": [*hooks.get("PreToolUse", []), guard]}
     return json.dumps(project | {"permissions": permissions, "sandbox": sandbox, "hooks": hooks})
 
 
-def write_guard(worktree: Path) -> str:
-    """The command of the hook that keeps the file tools in the worktree. It runs outside the sandbox, so it runs
-    from the main checkout without the agents' uv cache, as the project's hooks do."""
-    guard = ROOT / "scripts" / "hooks" / "write-guard"
-    return shlex.join(["env", "-u", "UV_CACHE_DIR", "-u", "UV_TOOL_DIR", str(guard), str(worktree)])
-
-
-def in_main_checkout(rule: str) -> str | None:
-    """The project's rule against reading or editing some of its own files, for the same files in the main
-    checkout. Other rules, and rules for paths from the home folder or absolute ones, give None."""
+def in_checkout(rule: str, checkout: Path) -> str | None:
+    """The project's rule against reading or editing some of its own files, for the same files in the checkout.
+    Other rules, and rules for paths from the home folder or absolute ones, give None."""
     tool, _, pattern = rule.partition("(")
     if tool not in ("Read", "Edit") or pattern.startswith(("~/", "//")):
         return None
     pattern = pattern.removeprefix("./")
     # Claude Code matches a pattern without a leading slash from the working directory, and some, such as .env and
-    # secrets/**, in every folder below it. Matching each pattern in every folder of the main checkout can only deny
-    # more than the project's rule does.
+    # secrets/**, in every folder below it. Matching each pattern in every folder of the checkout can only deny more
+    # than the project's rule does.
     if not pattern.startswith(("/", "**/")):
         pattern = f"**/{pattern}"
-    return f"{tool}({rule_path(ROOT)}/{pattern.removeprefix('/')}"
+    return f"{tool}({rule_path(checkout)}/{pattern.removeprefix('/')}"
 
 
 def secret_paths() -> list[Path]:
@@ -472,7 +479,7 @@ def rule_path(path: Path) -> str:
 
 
 def start(
-    account: usage.Account, agent_type: str, agent_id: str, worktree: Path, prompt: str, session_id: str
+    account: usage.Account, agent_type: AgentType, agent_id: str, worktree: Path, prompt: str, session_id: str
 ) -> Session:
     """Starts the agent's session, or continues it with its whole context if it has run before."""
     input_path = usage.AGENTS / f"{agent_id}.input"
@@ -495,7 +502,9 @@ def start(
     }
     resumes = bool(usage.transcript(account.name, session_id))
     # --setting-sources user keeps the agent from loading settings, agent types, skills and AGENTS.md from its
-    # worktree, where it could add a hook that runs outside the sandbox. A headless session starts every MCP server it finds without asking. --strict-mcp-config leaves out the account's
+    # worktree, where it could add a hook that runs outside the sandbox.
+    #
+    # A headless session starts every MCP server it finds without asking. --strict-mcp-config leaves out the account's
     # own servers and claude.ai connectors, because through them a prompt injection could reach the services the
     # maintainer connected to Claude.
     command = [
@@ -508,55 +517,57 @@ def start(
     if dropped and not resumes:
         prompt = f"{prompt}\n\n{left_out_message(dropped)}"
     if not resumes:
-        prompt = f"{instructions(agent_type)}\n\n{prompt}"
+        prompt = f"{agent_type.instructions}\n\n{prompt}"
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
-    # A first message with the skills is longer than a pipe holds, so its write waits until the agent reads it. An agent
-    # that exits first never does, so the write runs beside the launcher's wait for the agent, and ends with the
-    # launcher.
+    # The first message is longer than a pipe holds (8 KB on macOS), so writing it waits until the agent reads it. An
+    # agent that exits first never reads it, so the write runs in a thread, which ends with the launcher instead of
+    # holding it up.
     threading.Thread(target=send, args=(input_path, prompt), daemon=True).start()
     return session
 
 
-def agent_arguments(agent_type: str) -> list[str]:
-    """The arguments that start the agent as its type's definition on main describes it. --agents gets only the
-    fields that give instructions, a model and tools, because a definition's hooks and MCP servers would run outside
-    the sandbox, and an agent can plant a definition in the git objects that its worktree shares with the main
-    checkout. Claude Code ignores a definition's effort in the session that --agent starts, so it goes in --effort.
-    The skills come in the first message."""
-    fields = usage.agent_fields(agent_type)
-    definition = {"description": fields.get("description", ""), "prompt": usage.agent_prompt(agent_type)}
+def agent_type_from_main(name: str) -> AgentType:
+    """The agent type's definition, with AGENTS.md, each folder's AGENTS.md and the skills that the type preloads,
+    all from main, for an agent that loads none of them from its worktree."""
+    definition = text_from_main(f".claude/agents/{name}.md")
+    fields = usage.definition_fields(definition)
+    files = git("ls-tree", "-r", "-z", "--name-only", "origin/main").split("\0")
+    texts = [usage.without_front_matter(text_from_main("AGENTS.md"))]
+    for path in sorted(path for path in files if path.endswith("/AGENTS.md")):
+        rules = usage.without_front_matter(text_from_main(path))
+        texts.append(f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{rules}")
+    for skill in usage.preloaded_skills(fields):
+        texts.append(usage.without_front_matter(text_from_main(f".agents/skills/{skill}/SKILL.md")))
+    return AgentType(name, fields, usage.without_front_matter(definition), "\n\n".join(texts))
+
+
+def text_from_main(path: str) -> str:
+    if (text := usage.main_text(path)) is None:
+        raise SystemExit(f"The agent didn't start, because main has no {path}. Tell the maintainer.")
+    return text
+
+
+def agent_arguments(agent_type: AgentType) -> list[str]:
+    """The arguments that start an agent of the type. --agents gets only the definition's description, prompt, model
+    and tools, because hooks or MCP servers in it would run outside the sandbox, and an agent can rewrite the git
+    objects that main's definitions come from. Claude Code ignores a definition's effort in the session that --agent
+    starts, so it goes in --effort."""
+    fields = agent_type.fields
+    definition = {"description": fields.get("description", ""), "prompt": agent_type.prompt}
     if "model" in fields:
         definition["model"] = fields["model"]
     if "tools" in fields:
         definition["tools"] = usage.as_list(fields["tools"])
     effort = ["--effort", str(fields["effort"])] if "effort" in fields else []
-    return ["--agents", json.dumps({agent_type: definition}), "--agent", agent_type, *effort]
-
-
-def instructions(agent_type: str) -> str:
-    """AGENTS.md, the AGENTS.md of each folder that has rules of its own, and the skills that the agent type
-    preloads, from main, for an agent that loads none of them from its worktree."""
-    files = git("ls-tree", "-r", "-z", "--name-only", "origin/main").split("\0")
-    folder_rules = sorted(path for path in files if path.endswith("/AGENTS.md"))
-    skills = [f".agents/skills/{skill}/SKILL.md" for skill in usage.agent_skills(agent_type)]
-    texts = []
-    for path in ["AGENTS.md", *folder_rules, *skills]:
-        text = usage.main_file(path)
-        if text is None:
-            raise SystemExit(f"The agent didn't start, because main has no {path}.")
-        text = usage.without_front_matter(text)
-        if path in folder_rules:
-            text = f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{text}"
-        texts.append(text)
-    return "\n\n".join(texts)
+    return ["--agents", json.dumps({agent_type.name: definition}), "--agent", agent_type.name, *effort]
 
 
 def agent_type_refusal(agent_type: str) -> str:
     """Why no agent of the type can start, if main has no definition of it. Otherwise an empty string."""
-    if usage.main_file(f".claude/agents/{agent_type}.md") is None:
+    if usage.main_text(f".claude/agents/{agent_type}.md") is None:
         return f"Main has no agent type called {agent_type}. Launch one of the agent types in .claude/agents/."
     return ""
 
@@ -577,7 +588,7 @@ def mcp_arguments() -> list[str]:
 
 
 def started_in_main(command: list[str]) -> list[str]:
-    return ["/bin/sh", "-c", SERVER_START, "sh", str(ROOT), *command]
+    return ["/bin/sh", "-c", START_IN_MAIN, "sh", str(ROOT), *command]
 
 
 def mcp_json_refusal() -> str:
@@ -592,8 +603,8 @@ def mcp_json_refusal() -> str:
 def send(input_path: Path, text: str) -> None:
     """Gives the agent a message, which it reads after its current tool call."""
     line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
-    # Opened without waiting, so that a pipe that nothing reads any more fails at once. The write waits until the agent
-    # has read all of a message that's longer than the pipe holds.
+    # Opened without waiting, so that a pipe that nothing reads any more fails at once. The write then waits until the
+    # agent has read a message that's longer than the pipe holds.
     descriptor = os.open(input_path, os.O_WRONLY | os.O_NONBLOCK)
     os.set_blocking(descriptor, True)
     with os.fdopen(descriptor, "wb") as pipe:

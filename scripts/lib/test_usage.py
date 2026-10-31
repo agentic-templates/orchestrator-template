@@ -14,27 +14,19 @@ import usage
 
 
 class AgentSkillsTest(unittest.TestCase):
-    def setUp(self):
-        # Main's files as this checkout has them, which this branch's agent files are once it merges.
-        checkout = Path(__file__).resolve().parents[2]
-        patch = mock.patch.object(
-            usage, "main_file", lambda path: (checkout / path).read_text() if (checkout / path).exists() else None
-        )
-        patch.start()
-        self.addCleanup(patch.stop)
-
     def test_reads_the_skills_an_agent_type_preloads(self):
-        self.assertIn("building", usage.agent_skills("builder-small"))
-        self.assertNotIn("building", usage.agent_skills("reviewer"))
+        agents = Path(__file__).resolve().parents[2] / ".claude" / "agents"
+        builder, reviewer = ((agents / name).read_text() for name in ("builder-small.md", "reviewer.md"))
+        self.assertIn("building", usage.preloaded_skills(usage.definition_fields(builder)))
+        self.assertNotIn("building", usage.preloaded_skills(usage.definition_fields(reviewer)))
 
     def test_an_unknown_agent_type_preloads_nothing(self):
         self.assertEqual(usage.agent_skills("no-such-agent"), [])
 
     def test_reads_skills_written_as_lines(self):
-        definition = "---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n"
-        with mock.patch.object(usage, "main_file", lambda path: definition):
-            self.assertEqual(usage.agent_skills("builder-x"), ["building", "code"])
-            self.assertEqual(usage.agent_config("builder-x"), "opus/default")
+        fields = usage.definition_fields("---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n")
+        self.assertEqual(usage.preloaded_skills(fields), ["building", "code"])
+        self.assertEqual(fields["model"], "opus")
 
 
 class RunsElsewhereTest(unittest.TestCase):

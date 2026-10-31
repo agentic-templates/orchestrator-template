@@ -1,7 +1,6 @@
 import re
 import unittest
 from pathlib import Path
-from unittest import mock
 
 import usage
 
@@ -20,8 +19,8 @@ def preloaded_skills(agent_type: str) -> list[str]:
     """The skills in an agent's context from its first turn: its type's `skills:`, and for the orchestrator also the
     skills that the session-start hook adds. The test can't know which provider runs, so it adds them for every
     provider."""
-    with mock.patch.object(usage, "main_file", lambda path: (CHECKOUT / path).read_text()):
-        skills = usage.agent_skills(agent_type)
+    definition = (CHECKOUT / ".claude" / "agents" / f"{agent_type}.md").read_text()
+    skills = usage.preloaded_skills(usage.definition_fields(definition))
     if agent_type == "orchestrator":
         providers = [name.removeprefix("orchestrator-") for name in skill_names() if name.startswith("orchestrator-")]
         skills += [skill for provider in providers for skill in usage.orchestrator_skills(provider)]
