@@ -489,6 +489,8 @@ def start(
     # Opened for reading and writing, so that the agent's input stays open between messages.
     input_fd = os.open(input_path, os.O_RDWR)
     inherited, secret_names = without_secrets(usage.environment_for(account))
+    # Claude Code ranks it above --effort, which gives the agent its type's effort.
+    inherited.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
     environment = {
         **inherited,
         **agent_variables()[0],

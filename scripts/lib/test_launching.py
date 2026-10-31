@@ -239,7 +239,13 @@ class StartTest(unittest.TestCase):
         self.folder = Path(folder.name)
         agents_env = self.folder / "agents.env"
         agents_env.write_text("DEEPSEEK_API_KEY=from-file # host: api.deepseek.com\n")
-        inherited = {"PATH": os.environ["PATH"], "OPENAI_API_KEY": "x", "DEEPSEEK_API_KEY": "x", "GH_TOKEN": "x"}
+        inherited = {
+            "PATH": os.environ["PATH"],
+            "OPENAI_API_KEY": "x",
+            "DEEPSEEK_API_KEY": "x",
+            "GH_TOKEN": "x",
+            "CLAUDE_CODE_EFFORT_LEVEL": "max",
+        }
         # Stands in for Claude Code, which the test mustn't start.
         self.popen = mock.MagicMock()
         for patch in (
@@ -262,6 +268,10 @@ class StartTest(unittest.TestCase):
         message = json.loads(read_line(reader))["message"]["content"]
         command = self.popen.call_args.args[0]
         return self.popen.call_args.kwargs["env"], message, command
+
+    def test_an_agent_doesnt_inherit_an_effort_that_would_override_its_types(self):
+        environment, _, _ = self.start(resumes=False)
+        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", environment)
 
     def test_an_agent_loads_no_settings_from_its_worktree(self):
         _, _, command = self.start(resumes=False)
