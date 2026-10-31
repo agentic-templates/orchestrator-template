@@ -494,8 +494,8 @@ def start(
         "UV_TOOL_DIR": str(UV_CACHE / "tools"),
     }
     resumes = bool(usage.transcript(account.name, session_id))
-    # With --setting-sources user, the agent loads no settings, agent types, skills or AGENTS.md from its worktree.
-    # A headless session starts every MCP server it finds without asking. --strict-mcp-config leaves out the account's
+    # --setting-sources user keeps the agent from loading settings, agent types, skills and AGENTS.md from its
+    # worktree, where it could add a hook that runs outside the sandbox. A headless session starts every MCP server it finds without asking. --strict-mcp-config leaves out the account's
     # own servers and claude.ai connectors, because through them a prompt injection could reach the services the
     # maintainer connected to Claude.
     command = [
@@ -524,7 +524,8 @@ def agent_arguments(agent_type: str) -> list[str]:
     """The arguments that start the agent as its type's definition on main describes it. --agents gets only the
     fields that give instructions, a model and tools, because a definition's hooks and MCP servers would run outside
     the sandbox, and an agent can plant a definition in the git objects that its worktree shares with the main
-    checkout. A definition's effort applies only through --effort, and its skills come in the first message."""
+    checkout. Claude Code ignores a definition's effort in the session that --agent starts, so it goes in --effort.
+    The skills come in the first message."""
     fields = usage.agent_fields(agent_type)
     definition = {"description": fields.get("description", ""), "prompt": usage.agent_prompt(agent_type)}
     if "model" in fields:
@@ -556,7 +557,7 @@ def instructions(agent_type: str) -> str:
 def agent_type_refusal(agent_type: str) -> str:
     """Why no agent of the type can start, if main has no definition of it. Otherwise an empty string."""
     if usage.main_file(f".claude/agents/{agent_type}.md") is None:
-        return f"Main has no agent type called {agent_type}. The agent types are the files in .claude/agents/."
+        return f"Main has no agent type called {agent_type}. Launch one of the agent types in .claude/agents/."
     return ""
 
 

@@ -7,8 +7,9 @@
 usage: scripts/hooks/write-guard <worktree>
 
 Claude Code's sandbox covers only commands, so without this hook an agent's file tools could write outside its
-worktree, such as a hook into the settings of another checkout, or into the worktree's own git files, which the
-loop's git reads outside the sandbox. scripts/launch adds it to every agent's settings.
+worktree, such as a hook into the main checkout's settings, which every agent's hooks come from, or into the
+worktree's own git files, which the loop's git reads outside the sandbox. scripts/launch adds it to every agent's
+settings.
 """
 
 import json
