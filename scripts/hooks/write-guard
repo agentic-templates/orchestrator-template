@@ -1,0 +1,44 @@
+#!/usr/bin/env -S uv run --script --quiet
+# /// script
+# requires-python = ">=3.12"
+# ///
+"""A PreToolUse hook that keeps an agent's Edit, Write and NotebookEdit calls in its worktree.
+
+usage: scripts/hooks/write-guard <worktree>
+
+Claude Code's sandbox covers only commands, so without this hook an agent's file tools could write outside its
+worktree, such as a hook into the settings of another checkout, or into the worktree's own git files, which the
+loop's git reads outside the sandbox. scripts/launch adds it to every agent's settings.
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def refusal(path: str, worktree: str) -> str:
+    """Why the file tools may not write to the path, or an empty string if they may."""
+    if not os.path.isabs(path):
+        return f"{path} isn't an absolute path. Give the file's absolute path in your worktree, {worktree}."
+    # Resolved, so that a link in the worktree can't lead outside it.
+    real = Path(os.path.realpath(path))
+    root = Path(os.path.realpath(worktree))
+    if not real.is_relative_to(root):
+        return f"{path} is outside your worktree, {worktree}. Write only to files in it."
+    # macOS's file system ignores case by default, so .GIT is the same folder there.
+    if any(part.lower() == ".git" for part in real.relative_to(root).parts):
+        return f"{path} is one of git's own files. Change it only with git commands."
+    return ""
+
+
+def main() -> None:
+    tool_input = json.load(sys.stdin).get("tool_input", {})
+    path = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    if reason := refusal(path, sys.argv[1]):
+        print(reason, file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

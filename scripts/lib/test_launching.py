@@ -1,8 +1,11 @@
 import json
 import os
+import select
+import shlex
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 from datetime import UTC, datetime
@@ -16,6 +19,7 @@ import usage
 CLAUDE = usage.Account("claude", "claude", None)
 CLAUDE_2 = usage.Account("claude-2", "claude", "~/.claude-2")
 ACCOUNTS = [CLAUDE, CLAUDE_2, usage.Account("codex", "codex", None)]
+WORKTREE = launching.WORKTREES / "builder-1-test"
 
 
 def decisions(claude_room: int, claude_2_room: int, codex_room: int = 5) -> dict[str, meter.Decision]:
@@ -72,11 +76,11 @@ class SettingsTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def test_the_sandbox_lets_an_agent_write_only_its_own_uv_cache(self):
-        writable = json.loads(launching.settings())["sandbox"]["filesystem"]["allowWrite"]
+        writable = json.loads(launching.settings(WORKTREE))["sandbox"]["filesystem"]["allowWrite"]
         self.assertEqual(writable, [str(launching.UV_CACHE)])
 
     def test_an_agent_cant_run_a_command_outside_the_sandbox(self):
-        self.assertIs(json.loads(launching.settings())["sandbox"]["allowUnsandboxedCommands"], False)
+        self.assertIs(json.loads(launching.settings(WORKTREE))["sandbox"]["allowUnsandboxedCommands"], False)
 
     def test_an_agent_cant_read_secrets_or_account_folders_but_can_read_what_gh_and_git_need(self):
         folder = tempfile.TemporaryDirectory()
@@ -87,7 +91,7 @@ class SettingsTest(unittest.TestCase):
         accounts = home / "accounts.json"
         accounts.write_text(json.dumps([{"name": "claude-2", "provider": "claude", "home": str(home / ".claude-2")}]))
         with mock.patch.object(Path, "home", lambda: home), mock.patch.object(launching.usage, "ACCOUNTS", accounts):
-            settings = json.loads(launching.settings())
+            settings = json.loads(launching.settings(WORKTREE))
         denied = settings["permissions"]["deny"]
         expected = [
             "Read(~/.netrc)",
@@ -120,13 +124,39 @@ class SettingsTest(unittest.TestCase):
         ]
         (main / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"deny": deny}, "sandbox": {}}))
         with mock.patch.object(launching, "ROOT", main):
-            denied = json.loads(launching.settings())["permissions"]["deny"]
+            denied = json.loads(launching.settings(WORKTREE))["permissions"]["deny"]
         in_main = [rule for rule in denied if rule.startswith((f"Read(/{main}/", f"Edit(/{main}/"))]
         expected = [
             f"Read(/{main}/{path})"
             for path in ("**/.env", "**/.env.*", "secrets/**", "**/keys/**", "**/key.pem", "**/~secrets")
         ]
         self.assertEqual(in_main, [*expected, f"Edit(/{main}/.loop/agents.env)"])
+
+    def test_an_agent_gets_the_main_checkouts_hooks_and_environment(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        main = Path(folder.name)
+        (main / ".claude").mkdir()
+        project = {
+            "permissions": {"deny": []},
+            "sandbox": {},
+            "env": {"BASH_DEFAULT_TIMEOUT_MS": "30000"},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "scripts/hooks/watcher"}]}]},
+        }
+        (main / ".claude" / "settings.json").write_text(json.dumps(project))
+        with mock.patch.object(launching, "ROOT", main):
+            settings = json.loads(launching.settings(WORKTREE))
+        self.assertEqual(settings["env"], project["env"])
+        self.assertEqual(settings["hooks"]["Stop"], project["hooks"]["Stop"])
+
+    def test_the_file_tools_write_only_in_the_worktree_and_the_session_stays_in_it(self):
+        settings = json.loads(launching.settings(WORKTREE))
+        guards = [entry for entry in settings["hooks"]["PreToolUse"] if entry["matcher"] == "Edit|Write|NotebookEdit"]
+        self.assertEqual(len(guards), 1)
+        guard = str(launching.ROOT / "scripts" / "hooks" / "write-guard")
+        expected = ["env", "-u", "UV_CACHE_DIR", "-u", "UV_TOOL_DIR", guard, str(WORKTREE)]
+        self.assertEqual(shlex.split(guards[0]["hooks"][0]["command"]), expected)
+        self.assertIn("EnterWorktree", settings["permissions"]["deny"])
 
 
 class AgentVariablesTest(unittest.TestCase):
@@ -213,6 +243,8 @@ class StartTest(unittest.TestCase):
             mock.patch.object(launching.usage, "AGENTS", self.folder / "agents"),
             mock.patch.object(launching, "github_login", lambda: {"GH_TOKEN": "the-loops"}),
             mock.patch.object(launching.subprocess, "Popen", self.popen),
+            mock.patch.object(launching, "agent_arguments", lambda agent_type: ["--agent", agent_type]),
+            mock.patch.object(launching, "instructions", lambda agent_type: "The rules."),
         ):
             patch.start()
             self.addCleanup(patch.stop)
@@ -223,16 +255,21 @@ class StartTest(unittest.TestCase):
             launching.start(ACCOUNTS[0], "builder", "builder-1-test", self.folder, "Build issue #1.", "session")
         reader = os.open(self.folder / "agents" / "builder-1-test.input", os.O_RDONLY | os.O_NONBLOCK)
         self.addCleanup(os.close, reader)
-        message = json.loads(os.read(reader, 65536))["message"]["content"]
+        message = json.loads(read_line(reader))["message"]["content"]
         command = self.popen.call_args.args[0]
         return self.popen.call_args.kwargs["env"], message, command
+
+    def test_a_new_agent_loads_nothing_from_its_worktree_and_gets_mains_rules_before_its_task(self):
+        _, message, command = self.start(resumes=False)
+        self.assertEqual(command[command.index("--setting-sources") + 1], "user")
+        self.assertTrue(message.startswith("The rules.\n\nBuild issue #1."))
 
     def test_an_agent_gets_the_files_variables_but_not_inherited_secrets(self):
         environment, message, command = self.start(resumes=False)
         self.assertNotIn("OPENAI_API_KEY", environment)
         self.assertEqual(environment["DEEPSEEK_API_KEY"], "from-file")
         self.assertEqual(environment["GH_TOKEN"], "the-loops")
-        self.assertTrue(message.startswith("Build issue #1.\n\n"))
+        self.assertIn("Build issue #1.\n\n", message)
         self.assertIn("leaves out OPENAI_API_KEY.", message)
         self.assertNotIn("DEEPSEEK_API_KEY", message)
         self.assertNotIn("GH_TOKEN", message)
@@ -259,6 +296,96 @@ class StartTest(unittest.TestCase):
         environment, message, _ = self.start(resumes=True)
         self.assertNotIn("OPENAI_API_KEY", environment)
         self.assertEqual(message, "Build issue #1.")
+
+
+def read_line(descriptor: int) -> bytes:
+    """A line from the pipe, read as the agent reads its messages."""
+    line = b""
+    while not line.endswith(b"\n"):
+        select.select([descriptor], [], [], 5)
+        if not (chunk := os.read(descriptor, 65536)):
+            break
+        line += chunk
+    return line
+
+
+class SendTest(unittest.TestCase):
+    def test_a_message_longer_than_a_pipe_holds_arrives_whole(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "input"
+        os.mkfifo(path)
+        reader = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        self.addCleanup(os.close, reader)
+        text = "x" * 100_000
+        writer = threading.Thread(target=launching.send, args=(path, text))
+        writer.start()
+        line = read_line(reader)
+        writer.join()
+        self.assertEqual(json.loads(line)["message"]["content"], text)
+
+
+class MainCommitTest(unittest.TestCase):
+    """A repository whose main, as the launcher last fetched it, differs from its checkout's files."""
+
+    @classmethod
+    def setUpClass(cls):
+        folder = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(folder.cleanup)
+        cls.root = Path(folder.name)
+        files = {
+            "AGENTS.md": "# How to work here\n",
+            "importer/AGENTS.md": "# Importer rules\n",
+            ".agents/skills/building/SKILL.md": "---\nname: building\ndescription: Builds.\n---\n\n# Building\n",
+            ".agents/skills/code/SKILL.md": "---\nname: code\ndescription: Code.\n---\n\n# Code\n",
+            ".claude/agents/builder-x.md": (
+                "---\nname: builder-x\ndescription: Builds one issue.\nmodel: opus\neffort: xhigh\ntools: Bash, Read\n"
+                "skills: [building, code]\nhooks:\n  - planted\nmcpServers:\n  - planted\n---\n\nYou build one issue.\n"
+            ),
+            ".claude/agents/builder-y.md": "---\nname: builder-y\ndescription: Builds.\nskills: [missing]\n---\n\nBuild.\n",
+        }
+        for path, text in files.items():
+            (cls.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (cls.root / path).write_text(text)
+        run_git(cls.root, "init", "--quiet")
+        run_git(cls.root, "add", "--all")
+        identity = ("-c", "user.name=Test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false")
+        run_git(cls.root, *identity, "commit", "--quiet", "--no-verify", "-m", "start")
+        run_git(cls.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        (cls.root / "AGENTS.md").write_text("# Changed in the checkout\n")
+
+    def setUp(self):
+        for patch in (
+            mock.patch.object(usage, "ROOT", self.root),
+            mock.patch.dict(launching.git.__kwdefaults__, {"cwd": self.root}),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_an_agent_gets_mains_agents_md_folder_rules_and_preloaded_skills(self):
+        expected = (
+            "# How to work here\n\nimporter/AGENTS.md, the rules for the files in importer/:\n\n# Importer rules\n\n"
+            "# Building\n\n# Code"
+        )
+        self.assertEqual(launching.instructions("builder-x"), expected)
+
+    def test_a_preloaded_skill_missing_from_main_stops_the_agent(self):
+        with self.assertRaises(SystemExit) as raised:
+            launching.instructions("builder-y")
+        self.assertIn(".agents/skills/missing/SKILL.md", str(raised.exception))
+
+    def test_the_agent_type_gets_its_prompt_model_tools_and_effort_but_no_hooks_or_mcp_servers(self):
+        arguments = launching.agent_arguments("builder-x")
+        definition = {"description": "Builds one issue.", "prompt": "You build one issue.", "model": "opus"}
+        self.assertEqual(json.loads(arguments[1]), {"builder-x": definition | {"tools": ["Bash", "Read"]}})
+        self.assertEqual(arguments[2:], ["--agent", "builder-x", "--effort", "xhigh"])
+
+    def test_an_agent_type_without_an_effort_gets_the_accounts_effort(self):
+        self.assertEqual(launching.agent_arguments("builder-y")[2:], ["--agent", "builder-y"])
+
+    def test_an_agent_type_that_main_doesnt_have_is_refused(self):
+        self.assertIn("builder-z", launching.agent_type_refusal("builder-z"))
+        self.assertEqual(launching.agent_type_refusal("builder-x"), "")
 
 
 class McpServersTest(unittest.TestCase):

@@ -11,6 +11,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -305,11 +306,15 @@ def holding(porcelain: str, branch: str) -> list[Path]:
     return [Path(lines[0].removeprefix("worktree ")) for lines in blocks if f"branch refs/heads/{branch}" in lines]
 
 
-def settings() -> str:
-    """The project's permissions and sandbox, given again on the command line. A headless session loads the
-    project's own settings from its worktree, but ignores their allow rules in a folder its account hasn't
-    trusted. The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and
-    the agent can't ask to run a command outside it, because the allow rules would approve that without asking."""
+def settings(worktree: Path) -> str:
+    """The project's settings from the main checkout's files, for an agent that loads none from its worktree, where
+    it could add a hook that runs outside the sandbox. A git object can change those files only once someone updates
+    the main checkout, and an agent can write the git objects that its worktree shares with the main checkout.
+
+    The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and the agent
+    can't ask to run a command outside it, because the allow rules would approve that without asking. The sandbox
+    covers only commands, so a hook keeps the file tools in the worktree, and the agent can't move its session to
+    another worktree."""
     project = json.loads((ROOT / ".claude" / "settings.json").read_text())
     sandbox = project["sandbox"] | {"allowUnsandboxedCommands": False}
     filesystem = sandbox.setdefault("filesystem", {})
@@ -323,10 +328,20 @@ def settings() -> str:
     # The project's rules for its own files, such as .env files, match only in the agent's worktree, which has none of
     # those files. The maintainer's copies are in the main checkout.
     rules += [rule for rule in map(in_main_checkout, deny) if rule]
-    permissions = project["permissions"] | {"deny": deny + rules}
+    permissions = project["permissions"] | {"deny": [*deny, *rules, "EnterWorktree"]}
     credentials = sandbox.setdefault("credentials", {})
     credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]
-    return json.dumps({"permissions": permissions, "sandbox": sandbox})
+    hooks = project.get("hooks", {})
+    guard = {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": write_guard(worktree)}]}
+    hooks = hooks | {"PreToolUse": [*hooks.get("PreToolUse", []), guard]}
+    return json.dumps(project | {"permissions": permissions, "sandbox": sandbox, "hooks": hooks})
+
+
+def write_guard(worktree: Path) -> str:
+    """The command of the hook that keeps the file tools in the worktree. It runs outside the sandbox, so it runs
+    from the main checkout without the agents' uv cache, as the project's hooks do."""
+    guard = ROOT / "scripts" / "hooks" / "write-guard"
+    return shlex.join(["env", "-u", "UV_CACHE_DIR", "-u", "UV_TOOL_DIR", str(guard), str(worktree)])
 
 
 def in_main_checkout(rule: str) -> str | None:
@@ -479,23 +494,70 @@ def start(
         "UV_TOOL_DIR": str(UV_CACHE / "tools"),
     }
     resumes = bool(usage.transcript(account.name, session_id))
+    # With --setting-sources user, the agent loads no settings, agent types, skills or AGENTS.md from its worktree.
     # A headless session starts every MCP server it finds without asking. --strict-mcp-config leaves out the account's
     # own servers and claude.ai connectors, because through them a prompt injection could reach the services the
     # maintainer connected to Claude.
     command = [
-        "claude", "-p", "--agent", agent_type, "--input-format", "stream-json", "--output-format", "stream-json",
-        "--verbose", "--settings", settings(), "--strict-mcp-config", *mcp_arguments(), "--name", agent_id,
+        "claude", "-p", "--setting-sources", "user", *agent_arguments(agent_type), "--input-format", "stream-json",
+        "--output-format", "stream-json", "--verbose", "--settings", settings(worktree), "--strict-mcp-config",
+        *mcp_arguments(), "--name", agent_id,
         *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
     dropped = [name for name in secret_names if name not in environment]
     if dropped and not resumes:
         prompt = f"{prompt}\n\n{left_out_message(dropped)}"
+    if not resumes:
+        prompt = f"{instructions(agent_type)}\n\n{prompt}"
     process = subprocess.Popen(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
-    send(input_path, prompt)
+    # A first message with the skills is longer than a pipe holds, so its write waits until the agent reads it. An agent
+    # that exits first never does, so the write runs beside the launcher's wait for the agent, and ends with the
+    # launcher.
+    threading.Thread(target=send, args=(input_path, prompt), daemon=True).start()
     return session
+
+
+def agent_arguments(agent_type: str) -> list[str]:
+    """The arguments that start the agent as its type's definition on main describes it. --agents gets only the
+    fields that give instructions, a model and tools, because a definition's hooks and MCP servers would run outside
+    the sandbox, and an agent can plant a definition in the git objects that its worktree shares with the main
+    checkout. A definition's effort applies only through --effort, and its skills come in the first message."""
+    fields = usage.agent_fields(agent_type)
+    definition = {"description": fields.get("description", ""), "prompt": usage.agent_prompt(agent_type)}
+    if "model" in fields:
+        definition["model"] = fields["model"]
+    if "tools" in fields:
+        definition["tools"] = usage.as_list(fields["tools"])
+    effort = ["--effort", str(fields["effort"])] if "effort" in fields else []
+    return ["--agents", json.dumps({agent_type: definition}), "--agent", agent_type, *effort]
+
+
+def instructions(agent_type: str) -> str:
+    """AGENTS.md, the AGENTS.md of each folder that has rules of its own, and the skills that the agent type
+    preloads, from main, for an agent that loads none of them from its worktree."""
+    files = git("ls-tree", "-r", "-z", "--name-only", "origin/main").split("\0")
+    folder_rules = sorted(path for path in files if path.endswith("/AGENTS.md"))
+    skills = [f".agents/skills/{skill}/SKILL.md" for skill in usage.agent_skills(agent_type)]
+    texts = []
+    for path in ["AGENTS.md", *folder_rules, *skills]:
+        text = usage.main_file(path)
+        if text is None:
+            raise SystemExit(f"The agent didn't start, because main has no {path}.")
+        text = usage.without_front_matter(text)
+        if path in folder_rules:
+            text = f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{text}"
+        texts.append(text)
+    return "\n\n".join(texts)
+
+
+def agent_type_refusal(agent_type: str) -> str:
+    """Why no agent of the type can start, if main has no definition of it. Otherwise an empty string."""
+    if usage.main_file(f".claude/agents/{agent_type}.md") is None:
+        return f"Main has no agent type called {agent_type}. The agent types are the files in .claude/agents/."
+    return ""
 
 
 def mcp_arguments() -> list[str]:
@@ -529,11 +591,12 @@ def mcp_json_refusal() -> str:
 def send(input_path: Path, text: str) -> None:
     """Gives the agent a message, which it reads after its current tool call."""
     line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
+    # Opened without waiting, so that a pipe that nothing reads any more fails at once. The write waits until the agent
+    # has read all of a message that's longer than the pipe holds.
     descriptor = os.open(input_path, os.O_WRONLY | os.O_NONBLOCK)
-    try:
-        os.write(descriptor, line.encode())
-    finally:
-        os.close(descriptor)
+    os.set_blocking(descriptor, True)
+    with os.fdopen(descriptor, "wb") as pipe:
+        pipe.write(line.encode())
 
 
 def handle(session: Session, line: bytes) -> None:

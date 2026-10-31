@@ -474,14 +474,29 @@ def orchestrator_account() -> str | None:
     return orchestrator().get("account")
 
 
+def main_file(path: str) -> str | None:
+    """The file's text in the main commit that the launcher last fetched, or None if that commit has no such file.
+    Agents' instructions come from there rather than from the main checkout's files, which nothing updates, so that a
+    merged change to them reaches the next agent at once."""
+    result = subprocess.run(
+        ["git", "cat-file", "blob", f"origin/main:{path}"], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def without_front_matter(text: str) -> str:
+    return text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
+
+
 def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
-    """The fields at the top of an agent type's definition in .claude/agents/, such as its model. A list written as
-    lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
-    path = ROOT / ".claude" / "agents" / f"{agent_type}.md"
+    """The fields at the top of an agent type's definition in .claude/agents/ on main, such as its model, or none if
+    main has no such agent type. A list written as lines that start with "-" comes as a list, and one written on one
+    line, such as "[building, code]", as text."""
+    definition = main_file(f".claude/agents/{agent_type}.md")
     fields: dict[str, str | list[str]] = {}
     key = ""
-    if path.exists():
-        for line in path.read_text().split("---")[1].splitlines():
+    if definition:
+        for line in definition.split("---")[1].splitlines():
             if line.strip().startswith("-") and key:
                 fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
                 continue
@@ -489,6 +504,17 @@ def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
             key = key.strip()
             fields[key] = value.strip()
     return fields
+
+
+def agent_prompt(agent_type: str) -> str:
+    """The text below the fields of an agent type's definition on main."""
+    return without_front_matter(main_file(f".claude/agents/{agent_type}.md") or "")
+
+
+def as_list(value: str | list[str]) -> list[str]:
+    """A field's list, written either way that agent_fields reads."""
+    items = value.strip("[]").split(",") if isinstance(value, str) else value
+    return [item.strip() for item in items if item.strip()]
 
 
 def agent_config(agent_type: str) -> str:
@@ -504,7 +530,4 @@ def orchestrator_skills(provider: str) -> list[str]:
 
 def agent_skills(agent_type: str) -> list[str]:
     """The skills that an agent type preloads, from its definition."""
-    skills = agent_fields(agent_type).get("skills", "")
-    if isinstance(skills, str):
-        skills = skills.strip("[]").split(",")
-    return [skill.strip() for skill in skills if skill.strip()]
+    return as_list(agent_fields(agent_type).get("skills", ""))

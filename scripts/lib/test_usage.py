@@ -14,6 +14,15 @@ import usage
 
 
 class AgentSkillsTest(unittest.TestCase):
+    def setUp(self):
+        # Main's files as this checkout has them, which this branch's agent files are once it merges.
+        checkout = Path(__file__).resolve().parents[2]
+        patch = mock.patch.object(
+            usage, "main_file", lambda path: (checkout / path).read_text() if (checkout / path).exists() else None
+        )
+        patch.start()
+        self.addCleanup(patch.stop)
+
     def test_reads_the_skills_an_agent_type_preloads(self):
         self.assertIn("building", usage.agent_skills("builder-small"))
         self.assertNotIn("building", usage.agent_skills("reviewer"))
@@ -22,13 +31,8 @@ class AgentSkillsTest(unittest.TestCase):
         self.assertEqual(usage.agent_skills("no-such-agent"), [])
 
     def test_reads_skills_written_as_lines(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        agents = Path(folder.name) / ".claude" / "agents"
-        agents.mkdir(parents=True)
         definition = "---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n"
-        (agents / "builder-x.md").write_text(definition)
-        with mock.patch.object(usage, "ROOT", Path(folder.name)):
+        with mock.patch.object(usage, "main_file", lambda path: definition):
             self.assertEqual(usage.agent_skills("builder-x"), ["building", "code"])
             self.assertEqual(usage.agent_config("builder-x"), "opus/default")
 

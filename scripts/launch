@@ -100,6 +100,9 @@ def main() -> int:
         return 2
     if arguments.resume:
         return resume(arguments)
+    if refusal := launching.agent_type_refusal(arguments.agent_type):
+        print(refusal)
+        return 2
     if launching.builds(arguments.agent_type) and (refusal := launching.refuse_builder(arguments.number)):
         print(refusal)
         return 2
