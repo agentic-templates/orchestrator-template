@@ -477,20 +477,28 @@ def orchestrator_account() -> str | None:
 def main_text(path: str) -> str | None:
     """The file's text in the main commit that the launcher last fetched, or None if that commit has no such file.
     Agents' instructions come from there rather than from the main checkout's files, which may be older, so that a
-    merged change to them reaches the next agent at once."""
+    merged change to them reaches the next agent at once. Exits with git's error if git can't read that commit."""
     result = subprocess.run(
         ["git", "cat-file", "blob", f"origin/main:{path}"], cwd=ROOT, capture_output=True, text=True, check=False
     )
-    return result.stdout if result.returncode == 0 else None
+    if result.returncode == 0:
+        return result.stdout
+    # Git fails the same way for a file that main doesn't have and for a main that it can't read.
+    main = subprocess.run(
+        ["git", "rev-parse", "--quiet", "--verify", "origin/main^{commit}"], cwd=ROOT, capture_output=True
+    )
+    if main.returncode:
+        raise SystemExit(f"Git can't read main: {result.stderr.strip()}")
+    return None
 
 
 def without_front_matter(text: str) -> str:
-    """The text below the fields between a file's opening "---" lines."""
+    """The text below the fields between a file's two "---" lines."""
     return text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
 
 
 def definition_fields(definition: str) -> dict[str, str | list[str]]:
-    """The fields between the opening "---" lines of an agent type's definition, such as its model. A list written
+    """The fields between the two "---" lines of an agent type's definition, such as its model. A list written
     as lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
     fields: dict[str, str | list[str]] = {}
     key = ""

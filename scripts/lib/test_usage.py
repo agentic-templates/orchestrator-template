@@ -16,9 +16,10 @@ import usage
 class AgentSkillsTest(unittest.TestCase):
     def test_reads_the_skills_an_agent_type_preloads(self):
         agents = Path(__file__).resolve().parents[2] / ".claude" / "agents"
-        builder, reviewer = ((agents / name).read_text() for name in ("builder-small.md", "reviewer.md"))
-        self.assertIn("building", usage.preloaded_skills(usage.definition_fields(builder)))
-        self.assertNotIn("building", usage.preloaded_skills(usage.definition_fields(reviewer)))
+        builder_small = usage.definition_fields((agents / "builder-small.md").read_text())
+        reviewer = usage.definition_fields((agents / "reviewer.md").read_text())
+        self.assertIn("building", usage.preloaded_skills(builder_small))
+        self.assertNotIn("building", usage.preloaded_skills(reviewer))
 
     def test_an_unknown_agent_type_preloads_nothing(self):
         self.assertEqual(usage.agent_skills("no-such-agent"), [])

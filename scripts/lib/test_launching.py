@@ -252,9 +252,9 @@ class StartTest(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def start(self, resumes: bool, instructions: str = "The rules.") -> tuple[dict[str, str], str, list[str]]:
+    def start(self, resumes: bool) -> tuple[dict[str, str], str, list[str]]:
         """The agent's environment, its first message and its command."""
-        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", instructions)
+        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "The rules.")
         with mock.patch.object(launching.usage, "transcript", lambda account, session: resumes):
             launching.start(ACCOUNTS[0], builder, "builder-1-test", self.folder, "Build issue #1.", "session")
         reader = os.open(self.folder / "agents" / "builder-1-test.input", os.O_RDONLY | os.O_NONBLOCK)
@@ -360,7 +360,9 @@ class AgentTypeFromMainTest(unittest.TestCase):
                 "---\nname: builder-x\ndescription: Builds one issue.\nmodel: opus\neffort: xhigh\n"
                 "skills: [building, code]\n---\n\nYou build one issue.\n"
             ),
-            ".claude/agents/builder-y.md": "---\nname: builder-y\ndescription: Builds.\nskills: [missing]\n---\n\nBuild.\n",
+            ".claude/agents/builder-y.md": (
+                "---\nname: builder-y\ndescription: Builds.\nmodel: sonnet\nskills: [missing]\n---\n\nBuild.\n"
+            ),
         }
         for path, text in files.items():
             (cls.root / path).parent.mkdir(parents=True, exist_ok=True)
@@ -380,7 +382,7 @@ class AgentTypeFromMainTest(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
 
-    def test_an_agent_gets_its_type_agents_md_folder_rules_and_preloaded_skills_as_main_has_them(self):
+    def test_an_agent_type_comes_with_mains_agents_md_folder_rules_and_preloaded_skills(self):
         builder = launching.agent_type_from_main("builder-x")
         self.assertEqual((builder.fields["model"], builder.prompt), ("opus", "You build one issue."))
         expected = (
@@ -394,13 +396,23 @@ class AgentTypeFromMainTest(unittest.TestCase):
             launching.agent_type_from_main("builder-y")
         self.assertIn(".agents/skills/missing/SKILL.md", str(raised.exception))
 
+    def test_a_main_that_git_cant_read_stops_the_launch_with_gits_error(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        empty = Path(folder.name)
+        run_git(empty, "init", "--quiet")
+        with mock.patch.object(usage, "ROOT", empty), self.assertRaises(SystemExit) as raised:
+            launching.agent_type_refusal("builder-x")
+        self.assertIn("Git can't read main", str(raised.exception))
+
     def test_an_agent_type_that_main_doesnt_have_is_refused(self):
         self.assertIn("builder-z", launching.agent_type_refusal("builder-z"))
         self.assertEqual(launching.agent_type_refusal("builder-x"), "")
 
     def test_the_record_names_the_agent_types_model_and_effort(self):
         self.assertEqual(usage.agent_config("builder-x"), "opus/xhigh")
-        self.assertEqual(usage.agent_config("builder-y"), "default/default")
+        self.assertEqual(usage.agent_config("builder-y"), "sonnet/default")
+        self.assertEqual(usage.agent_config("builder-z"), "default/default")
 
 
 class AgentArgumentsTest(unittest.TestCase):
@@ -410,7 +422,12 @@ class AgentArgumentsTest(unittest.TestCase):
     def test_the_agent_type_keeps_its_prompt_model_and_tools_but_not_its_hooks_or_mcp_servers(self):
         fields = {"description": "Builds.", "model": "opus", "tools": "Bash, Read", "hooks": "", "mcpServers": ""}
         arguments = self.arguments(fields)
-        definition = {"description": "Builds.", "prompt": "You build one issue.", "model": "opus", "tools": ["Bash", "Read"]}
+        definition = {
+            "description": "Builds.",
+            "prompt": "You build one issue.",
+            "model": "opus",
+            "tools": ["Bash", "Read"],
+        }
         self.assertEqual(json.loads(arguments[arguments.index("--agents") + 1]), {"builder-x": definition})
         self.assertEqual(arguments[arguments.index("--agent") + 1], "builder-x")
 
@@ -418,7 +435,7 @@ class AgentArgumentsTest(unittest.TestCase):
         arguments = self.arguments({"description": "Builds.", "effort": "xhigh"})
         self.assertEqual(arguments[arguments.index("--effort") + 1], "xhigh")
 
-    def test_an_agent_type_without_an_effort_sets_none(self):
+    def test_an_agent_type_without_an_effort_passes_no_effort(self):
         self.assertNotIn("--effort", self.arguments({"description": "Builds."}))
 
 

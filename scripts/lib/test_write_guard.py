@@ -44,7 +44,9 @@ class WriteGuardTest(unittest.TestCase):
     def test_gits_own_files_are_refused_in_any_case_and_any_folder(self):
         for path in (".git", ".GIT", "vendor/repo/.git/config", "vendor/repo/.Git/hooks/pre-commit"):
             with self.subTest(path=path):
-                self.assertIn("is a .git file or in a .git folder", refusal(str(self.worktree / path), str(self.worktree)))
+                self.assertIn(
+                    "is a .git file or in a .git folder", refusal(str(self.worktree / path), str(self.worktree))
+                )
 
     def test_a_relative_path_is_refused(self):
         self.assertIn("isn't an absolute path", refusal("scripts/new.py", str(self.worktree)))
@@ -80,7 +82,7 @@ class WriteGuardTest(unittest.TestCase):
     def test_input_the_hook_cant_read_stops_the_tool(self):
         code, errors = self.run_hook("not json")
         self.assertEqual(code, 2)
-        self.assertIn("The write guard failed", errors)
+        self.assertIn("The hook that checks file edits failed", errors)
 
 
 if __name__ == "__main__":

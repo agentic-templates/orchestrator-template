@@ -60,7 +60,7 @@ QUIET_SECONDS = 60
 MCP_JSON = ROOT / ".mcp.json"
 WRITE_GUARD = ROOT / "scripts" / "hooks" / "write-guard"
 # A program that runs outside the sandbox for an agent, such as an MCP server or the write guard, starts as the hooks
-# do: in the main checkout, without the agents' uv cache.
+# in the project's settings do: in the main checkout, without the agents' uv cache.
 START_IN_MAIN = 'cd "$1" && shift && exec env -u UV_CACHE_DIR -u UV_TOOL_DIR "$@"'
 # Set high, so that only an issue that builders can't finish reaches it, such as one stuck on a question only the
 # maintainer can settle. Each further session would reread the issue and the code for nothing.
@@ -324,8 +324,8 @@ def settings(worktree: Path) -> str:
 
     The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and the agent
     can't ask to run a command outside it, because the allow rules would approve that without asking. The sandbox
-    covers only Bash commands, so a hook keeps the file tools in the worktree. A deny rule keeps the session from
-    moving to another worktree."""
+    covers only Bash commands, so a hook keeps the file tools in the worktree. A deny rule keeps the session in the
+    worktree that the hook checks."""
     project = json.loads((ROOT / ".claude" / "settings.json").read_text())
     sandbox = project["sandbox"] | {"allowUnsandboxedCommands": False}
     filesystem = sandbox.setdefault("filesystem", {})
@@ -336,9 +336,9 @@ def settings(worktree: Path) -> str:
     # A path that may be a file or a folder is denied both ways.
     rules = [f"Read({path})" for path in secrets] + [f"Read({path}/**)" for path in secrets]
     deny = project["permissions"]["deny"]
-    # The project's rules for its own files, such as .env files, are given again for the main checkout, which holds
-    # the maintainer's copies, and for the worktree, because Claude Code reads a rule in --settings that starts with
-    # a slash as a path in a temporary folder.
+    # The project's rules for its own files, such as .env files, are repeated for the main checkout, which holds the
+    # maintainer's copies. They're repeated for the worktree too, because Claude Code reads a rule in --settings that
+    # starts with a slash as a path in a temporary folder.
     for checkout in (ROOT, worktree):
         rules += filter(None, (in_checkout(rule, checkout) for rule in deny))
     permissions = project["permissions"] | {"deny": [*deny, *rules, "EnterWorktree"]}
@@ -522,9 +522,9 @@ def start(
         command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
     )
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
-    # The first message is longer than a pipe holds (8 KB on macOS), so writing it waits until the agent reads it. An
-    # agent that exits first never reads it, so the write runs in a thread, which ends with the launcher instead of
-    # holding it up.
+    # The first message is longer than a pipe holds (8 KB in a test on macOS), so writing it waits until the agent
+    # reads it. An agent that exits first never reads it, so the write runs in a thread, which ends with the launcher
+    # instead of holding it up.
     threading.Thread(target=send, args=(input_path, prompt), daemon=True).start()
     return session
 
@@ -552,9 +552,9 @@ def text_from_main(path: str) -> str:
 
 def agent_arguments(agent_type: AgentType) -> list[str]:
     """The arguments that start an agent of the type. --agents gets only the definition's description, prompt, model
-    and tools, because hooks or MCP servers in it would run outside the sandbox, and an agent can rewrite the git
-    objects that main's definitions come from. Claude Code ignores a definition's effort in the session that --agent
-    starts, so it goes in --effort."""
+    and tools. Hooks or MCP servers in it would run outside the sandbox, and an agent can rewrite the git objects that
+    main's definitions come from. Claude Code ignores a definition's effort in the session that --agent starts, so it
+    goes in --effort."""
     fields = agent_type.fields
     definition = {"description": fields.get("description", ""), "prompt": agent_type.prompt}
     if "model" in fields:

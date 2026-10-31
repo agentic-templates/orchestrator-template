@@ -22,7 +22,7 @@ def refusal(path: str, worktree: str) -> str:
     if not path:
         return "The tool call names no file. Give the file's absolute path."
     if not os.path.isabs(path):
-        return f"{path} isn't an absolute path. Give the file's absolute path, which starts with {worktree}/."
+        return f"{path} isn't an absolute path. Give the file's full path, starting with your worktree's, {worktree}."
     # Resolved, so that a link in the worktree can't lead outside it.
     real = Path(os.path.realpath(path))
     root = Path(os.path.realpath(worktree))
@@ -45,7 +45,9 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except Exception as error:
-        # Claude Code stops the tool call only when the hook exits with 2, so any other failure would let it write.
-        print(f"The write guard failed, so it refused the call: {error}. Say so in your report.", file=sys.stderr)
+    except Exception as error:  # noqa: BLE001, because Claude Code lets the call through on any exit but 2
+        print(
+            f"The hook that checks file edits failed, so it refused the edit: {error}. Say in your report that it failed.",
+            file=sys.stderr,
+        )
         sys.exit(2)
