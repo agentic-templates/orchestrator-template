@@ -488,7 +488,9 @@ def main_text(path: str) -> str | None:
         ["git", "rev-parse", "--quiet", "--verify", "origin/main^{commit}"], cwd=ROOT, capture_output=True
     )
     if main.returncode:
-        raise SystemExit(f"Git can't read main: {result.stderr.strip()}")
+        raise SystemExit(
+            f"Git can't read main, so the agent didn't start: {result.stderr.strip()} Tell the maintainer."
+        )
     return None
 
 
