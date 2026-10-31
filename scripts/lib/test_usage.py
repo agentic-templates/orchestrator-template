@@ -15,22 +15,19 @@ import usage
 
 class AgentSkillsTest(unittest.TestCase):
     def test_reads_the_skills_an_agent_type_preloads(self):
-        self.assertIn("building", usage.agent_skills("builder-small"))
-        self.assertNotIn("building", usage.agent_skills("reviewer"))
+        agents = Path(__file__).resolve().parents[2] / ".claude" / "agents"
+        builder_small = usage.definition_fields((agents / "builder-small.md").read_text())
+        reviewer = usage.definition_fields((agents / "reviewer.md").read_text())
+        self.assertIn("building", usage.preloaded_skills(builder_small))
+        self.assertNotIn("building", usage.preloaded_skills(reviewer))
 
     def test_an_unknown_agent_type_preloads_nothing(self):
         self.assertEqual(usage.agent_skills("no-such-agent"), [])
 
     def test_reads_skills_written_as_lines(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        agents = Path(folder.name) / ".claude" / "agents"
-        agents.mkdir(parents=True)
-        definition = "---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n"
-        (agents / "builder-x.md").write_text(definition)
-        with mock.patch.object(usage, "ROOT", Path(folder.name)):
-            self.assertEqual(usage.agent_skills("builder-x"), ["building", "code"])
-            self.assertEqual(usage.agent_config("builder-x"), "opus/default")
+        fields = usage.definition_fields("---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n")
+        self.assertEqual(usage.preloaded_skills(fields), ["building", "code"])
+        self.assertEqual(fields["model"], "opus")
 
 
 class RunsElsewhereTest(unittest.TestCase):

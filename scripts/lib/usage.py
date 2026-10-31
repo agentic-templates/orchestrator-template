@@ -474,21 +474,62 @@ def orchestrator_account() -> str | None:
     return orchestrator().get("account")
 
 
-def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
-    """The fields at the top of an agent type's definition in .claude/agents/, such as its model. A list written as
-    lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
-    path = ROOT / ".claude" / "agents" / f"{agent_type}.md"
+def main_text(path: str) -> str | None:
+    """The file's text in the main commit that the launcher last fetched, or None if that commit has no such file.
+    Agents' instructions come from there rather than from the main checkout's files, which may be older, so that a
+    merged change to them reaches the next agent at once. Exits with git's error if git can't read that commit."""
+    result = subprocess.run(
+        ["git", "cat-file", "blob", f"origin/main:{path}"], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    if result.returncode == 0:
+        return result.stdout
+    # Git fails the same way for a file that main doesn't have and for a main that it can't read.
+    main = subprocess.run(
+        ["git", "rev-parse", "--quiet", "--verify", "origin/main^{commit}"], cwd=ROOT, capture_output=True, check=False
+    )
+    if main.returncode:
+        raise SystemExit(
+            f"Git can't read main, so the agent didn't start: {result.stderr.strip()} Tell the maintainer."
+        )
+    return None
+
+
+def without_front_matter(text: str) -> str:
+    """The text below the fields between a file's two "---" lines."""
+    return text.split("---", 2)[2].strip() if text.startswith("---") else text.strip()
+
+
+def definition_fields(definition: str) -> dict[str, str | list[str]]:
+    """The fields between the two "---" lines of an agent type's definition, such as its model. A list written
+    as lines that start with "-" comes as a list, and one written on one line, such as "[building, code]", as text."""
     fields: dict[str, str | list[str]] = {}
     key = ""
-    if path.exists():
-        for line in path.read_text().split("---")[1].splitlines():
-            if line.strip().startswith("-") and key:
-                fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
-                continue
-            key, _, value = line.partition(":")
-            key = key.strip()
-            fields[key] = value.strip()
+    for line in definition.split("---")[1].splitlines():
+        if line.strip().startswith("-") and key:
+            fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        fields[key] = value.strip()
     return fields
+
+
+def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
+    """The fields of an agent type's definition in .claude/agents/ on main, or no fields if main has no such agent
+    type."""
+    definition = main_text(f".claude/agents/{agent_type}.md")
+    return definition_fields(definition) if definition else {}
+
+
+def as_list(field: str | list[str]) -> list[str]:
+    """The items of a field that holds a list, written either way that definition_fields reads."""
+    items = field.strip("[]").split(",") if isinstance(field, str) else field
+    return [item.strip() for item in items if item.strip()]
+
+
+def preloaded_skills(fields: dict[str, str | list[str]]) -> list[str]:
+    """The skills that an agent type with these fields preloads."""
+    return as_list(fields.get("skills", ""))
 
 
 def agent_config(agent_type: str) -> str:
@@ -504,7 +545,4 @@ def orchestrator_skills(provider: str) -> list[str]:
 
 def agent_skills(agent_type: str) -> list[str]:
     """The skills that an agent type preloads, from its definition."""
-    skills = agent_fields(agent_type).get("skills", "")
-    if isinstance(skills, str):
-        skills = skills.strip("[]").split(",")
-    return [skill.strip() for skill in skills if skill.strip()]
+    return preloaded_skills(agent_fields(agent_type))
