@@ -485,7 +485,7 @@ def main_text(path: str) -> str | None:
         return result.stdout
     # Git fails the same way for a file that main doesn't have and for a main that it can't read.
     main = subprocess.run(
-        ["git", "rev-parse", "--quiet", "--verify", "origin/main^{commit}"], cwd=ROOT, capture_output=True
+        ["git", "rev-parse", "--quiet", "--verify", "origin/main^{commit}"], cwd=ROOT, capture_output=True, check=False
     )
     if main.returncode:
         raise SystemExit(

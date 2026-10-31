@@ -404,6 +404,8 @@ class AgentTypeFromMainTest(unittest.TestCase):
         with mock.patch.object(usage, "ROOT", empty), self.assertRaises(SystemExit) as raised:
             launching.agent_type_refusal("builder-x")
         self.assertIn("Git can't read main", str(raised.exception))
+        # Git's own error names the branch, which the launcher's words don't.
+        self.assertIn("origin/main", str(raised.exception))
 
     def test_an_agent_type_that_main_doesnt_have_is_refused(self):
         self.assertIn("builder-z", launching.agent_type_refusal("builder-z"))
