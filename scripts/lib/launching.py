@@ -298,7 +298,8 @@ def add_branch_worktree(path: Path, issue: int, continues: bool) -> None:
 
 
 def fetch() -> None:
-    """Fetches main, so that the agent type, its instructions and a new worktree come from main's latest commit."""
+    """Fetches from GitHub, so that an agent's type and instructions, and a worktree that isn't on an issue's branch,
+    come from main's latest commit."""
     with git_lock():
         git("fetch", "--quiet", "origin")
 
@@ -494,8 +495,9 @@ def start(
     usage.AGENTS.mkdir(parents=True, exist_ok=True)
     input_path.unlink(missing_ok=True)
     os.mkfifo(input_path)
-    # Opened for reading and writing, so that the pipe stays open between the messages that scripts/message writes.
-    messages = os.fdopen(os.open(input_path, os.O_RDWR), "rb")
+    # Opened for reading and writing, so that the named pipe stays open between the messages that scripts/message
+    # writes.
+    named_pipe = os.fdopen(os.open(input_path, os.O_RDWR), "rb")
     inherited, secret_names = without_secrets(usage.environment_for(account))
     # Claude Code ranks it above --effort, which gives the agent its type's effort.
     inherited.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
@@ -539,20 +541,19 @@ def start(
     agent_input = process.stdin
     assert agent_input is not None
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
-    # Writing a long message waits until the agent reads it. An agent that exits first never reads it, so the messages
-    # go through a thread, which ends with the launcher instead of holding it up.
-    threading.Thread(target=relay, args=(prompt, messages, agent_input), daemon=True).start()
+    # The relay waits for messages for as long as the agent runs, so it runs in a thread, which ends with the launcher.
+    threading.Thread(target=relay, args=(prompt, named_pipe, agent_input), daemon=True).start()
     return session
 
 
-def relay(first: str, messages: BinaryIO, agent_input: IO[bytes]) -> None:
-    """Gives the agent its first message, then each message that arrives in its named pipe. Claude Code 2.1.309 never
-    read a later message longer than about 8 KB from a named pipe on macOS, but reads one of any length from an
-    ordinary pipe, so the agent's input is an ordinary pipe that only the launcher writes."""
+def relay(first_message: str, named_pipe: BinaryIO, agent_input: IO[bytes]) -> None:
+    """Gives the agent its first message, then each message that arrives in its named pipe. Claude Code 2.1.309 on
+    macOS never read a later message of 15,000 characters from a named pipe. It read one of 20,000 from an ordinary
+    pipe, so the agent's input is an ordinary pipe, which only the launcher writes."""
     try:
-        agent_input.write(message_line(first))
+        agent_input.write(message_line(first_message))
         agent_input.flush()
-        for line in messages:
+        for line in named_pipe:
             agent_input.write(line)
             agent_input.flush()
     except BrokenPipeError:
@@ -633,8 +634,8 @@ def mcp_json_refusal() -> str:
 
 def send(input_path: Path, text: str) -> None:
     """Gives the agent a message, which it reads after its current tool call."""
-    # Opened without waiting, so that it fails at once when no launcher holds the pipe open. The write then waits
-    # while the launcher reads a message that's longer than the pipe holds.
+    # Opened without waiting, so that it fails at once when no launcher holds the named pipe open. The write then
+    # waits while the launcher reads a message that's longer than the named pipe holds.
     descriptor = os.open(input_path, os.O_WRONLY | os.O_NONBLOCK)
     os.set_blocking(descriptor, True)
     with os.fdopen(descriptor, "wb") as pipe:

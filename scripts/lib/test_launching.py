@@ -158,13 +158,12 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(len(guards), 1)
         # It starts as an MCP server does, which McpServersTest checks.
         expected = launching.started_in_main([str(launching.ROOT / "scripts" / "hooks" / "write-guard"), str(WORKTREE)])
-        self.assertEqual(shlex.split(guards[0]["hooks"][0]["command"])[: len(expected)], expected)
+        self.assertEqual(shlex.split(guards[0]["hooks"][0]["command"]), [*expected, "||", "exit", "2"])
 
     def test_a_write_guard_that_cant_start_refuses_the_call(self):
         with mock.patch.object(launching, "WRITE_GUARD", Path("/nonexistent/write-guard")):
             hooks = json.loads(launching.settings(WORKTREE))["hooks"]["PreToolUse"]
         command = hooks[-1]["hooks"][0]["command"]
-        # Claude Code refuses the call only when the hook exits with 2.
         ran = subprocess.run(["/bin/sh", "-c", command], input="{}", capture_output=True, text=True, check=False)
         self.assertEqual(ran.returncode, 2)
 
@@ -279,9 +278,12 @@ class StartTest(unittest.TestCase):
         command = self.popen.call_args.args[0]
         return self.popen.call_args.kwargs["env"], message, command
 
-    def test_an_agent_starts_as_its_type_with_the_write_guard_on_its_own_worktree(self):
+    def test_an_agent_starts_as_its_type(self):
         _, _, command = self.start(resumes=False)
         self.assertEqual(command[command.index("--agent") + 1], "builder")
+
+    def test_an_agents_write_guard_checks_its_own_worktree(self):
+        _, _, command = self.start(resumes=False)
         guard = json.loads(command[command.index("--settings") + 1])["hooks"]["PreToolUse"][-1]["hooks"][0]
         self.assertIn(str(self.folder), shlex.split(guard["command"]))
 
