@@ -74,6 +74,7 @@ def resume(arguments: argparse.Namespace) -> int:
     record = json.loads((usage.AGENTS / f"{arguments.resume}.json").read_text())
     account = next(a for a in usage.accounts() if a.name == record["account"])
     worktree = Path(record["worktree"])
+    launching.fetch()
     if not worktree.exists():
         issue = record["number"] if launching.built(record) else None
         worktree = launching.make_worktree(record["id"], issue, continues=True)
@@ -101,10 +102,13 @@ def main() -> int:
         return 2
     if arguments.resume:
         return resume(arguments)
+    launching.fetch()
     if refusal := launching.agent_type_refusal(arguments.agent_type):
         print(refusal)
         return 2
-    if launching.builds(arguments.agent_type) and (refusal := launching.refuse_builder(arguments.number)):
+    agent_type = launching.agent_type_from_main(arguments.agent_type)
+    builds = launching.builds(agent_type)
+    if builds and (refusal := launching.refuse_builder(arguments.number)):
         print(refusal)
         return 2
     decisions = metering.decisions()
@@ -118,18 +122,18 @@ def main() -> int:
     record = {
         "id": agent_id,
         "name": arguments.agent_type,
-        "config": usage.agent_config(arguments.agent_type),
+        "config": usage.agent_config(agent_type.fields),
         "account": account.name,
         "number": arguments.number,
         "session": session_id,
         "started": time.time(),
         "pid": os.getpid(),
         "worktree": str(worktree),
-        "builds": launching.builds(arguments.agent_type),
+        "builds": builds,
     }
     # Saved before the agent starts, so that the meter counts it for a launch that comes right after this one.
     usage.save_agent(record)
-    issue = arguments.number if record["builds"] else None
+    issue = arguments.number if builds else None
     try:
         launching.make_worktree(agent_id, issue, continues=arguments.successor)
     except SystemExit:
@@ -137,8 +141,6 @@ def main() -> int:
         (usage.AGENTS / f"{agent_id}.json").unlink()
         raise
     note = launching.note_for(arguments.number, arguments.successor) if issue else None
-    # Read after the worktree's fetch, so that the agent gets main's latest instructions.
-    agent_type = launching.agent_type_from_main(arguments.agent_type)
     session = launching.start(
         account, agent_type, agent_id, worktree, prompt_for(arguments, worktree, note), session_id
     )

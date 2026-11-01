@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import IO, BinaryIO
 
 import backlog
 import contexts
@@ -171,9 +172,9 @@ def choose_account(
     return account, ""
 
 
-def builds(agent_type: str) -> bool:
+def builds(agent_type: AgentType) -> bool:
     """Whether the agent type builds an issue on a branch of its own, which the launcher makes and saves."""
-    return "building" in usage.agent_skills(agent_type)
+    return "building" in usage.preloaded_skills(agent_type.fields)
 
 
 def built(record: dict) -> bool:
@@ -245,12 +246,11 @@ def busy_worktree(path: Path, branch: str, running: list[dict]) -> str:
 
 
 def make_worktree(agent_id: str, issue: int | None = None, continues: bool = False) -> Path:
-    """A worktree at the latest main, detached or on the issue's new branch, or with `continues`, on the issue's
+    """A worktree at main as last fetched, detached or on the issue's new branch, or with `continues`, on the issue's
     branch as it was pushed. It has an empty .loop/ for the agent's working files, which git ignores."""
     path = WORKTREES / agent_id
     with git_lock():
         if issue is None:
-            git("fetch", "--quiet", "origin")
             git(*SAFE_GIT, "worktree", "add", "--quiet", "--detach", str(path), "origin/main")
         else:
             add_branch_worktree(path, issue, continues)
@@ -295,6 +295,12 @@ def add_branch_worktree(path: Path, issue: int, continues: bool) -> None:
     git(*SAFE_GIT, "worktree", "add", "--quiet", "--no-track", "-B", branch, str(path), start)
     git("config", f"branch.{branch}.remote", "origin")
     git("config", f"branch.{branch}.merge", f"refs/heads/{branch}")
+
+
+def fetch() -> None:
+    """Fetches main, so that the agent type, its instructions and a new worktree come from main's latest commit."""
+    with git_lock():
+        git("fetch", "--quiet", "origin")
 
 
 @contextlib.contextmanager
@@ -345,7 +351,9 @@ def settings(worktree: Path) -> str:
     credentials = sandbox.setdefault("credentials", {})
     credentials["files"] = [*credentials.get("files", []), *({"path": path, "mode": "deny"} for path in secrets)]
     hooks = project.get("hooks", {})
-    command = shlex.join(started_in_main([str(WRITE_GUARD), str(worktree)]))
+    # Claude Code refuses the call only when the hook exits with 2, so a guard that can't start, such as when uv is
+    # missing, would let every write through.
+    command = shlex.join(started_in_main([str(WRITE_GUARD), str(worktree)])) + " || exit 2"
     guard = {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": command}]}
     hooks = hooks | {"PreToolUse": [*hooks.get("PreToolUse", []), guard]}
     return json.dumps(project | {"permissions": permissions, "sandbox": sandbox, "hooks": hooks})
@@ -486,8 +494,8 @@ def start(
     usage.AGENTS.mkdir(parents=True, exist_ok=True)
     input_path.unlink(missing_ok=True)
     os.mkfifo(input_path)
-    # Opened for reading and writing, so that the agent's input stays open between messages.
-    input_fd = os.open(input_path, os.O_RDWR)
+    # Opened for reading and writing, so that the pipe stays open between the messages that scripts/message writes.
+    messages = os.fdopen(os.open(input_path, os.O_RDWR), "rb")
     inherited, secret_names = without_secrets(usage.environment_for(account))
     # Claude Code ranks it above --effort, which gives the agent its type's effort.
     inherited.pop("CLAUDE_CODE_EFFORT_LEVEL", None)
@@ -521,14 +529,35 @@ def start(
     if not resumes:
         prompt = f"{agent_type.instructions}\n\n{prompt}"
     process = subprocess.Popen(
-        command, cwd=worktree, env=environment, stdin=input_fd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        command,
+        cwd=worktree,
+        env=environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
     )
+    agent_input = process.stdin
+    assert agent_input is not None
     session = Session(agent_id, session_id, account.name, worktree, process, input_path)
-    # The first message is longer than a pipe holds (8 KB in a test on macOS), so writing it waits until the agent
-    # reads it. An agent that exits first never reads it, so the write runs in a thread, which ends with the launcher
-    # instead of holding it up.
-    threading.Thread(target=send, args=(input_path, prompt), daemon=True).start()
+    # Writing a long message waits until the agent reads it. An agent that exits first never reads it, so the messages
+    # go through a thread, which ends with the launcher instead of holding it up.
+    threading.Thread(target=relay, args=(prompt, messages, agent_input), daemon=True).start()
     return session
+
+
+def relay(first: str, messages: BinaryIO, agent_input: IO[bytes]) -> None:
+    """Gives the agent its first message, then each message that arrives in its named pipe. Claude Code 2.1.309 never
+    read a later message longer than about 8 KB from a named pipe on macOS, but reads one of any length from an
+    ordinary pipe, so the agent's input is an ordinary pipe that only the launcher writes."""
+    try:
+        agent_input.write(message_line(first))
+        agent_input.flush()
+        for line in messages:
+            agent_input.write(line)
+            agent_input.flush()
+    except BrokenPipeError:
+        # The agent has exited, which the launcher's wait notices.
+        return
 
 
 def agent_type_from_main(name: str) -> AgentType:
@@ -604,13 +633,16 @@ def mcp_json_refusal() -> str:
 
 def send(input_path: Path, text: str) -> None:
     """Gives the agent a message, which it reads after its current tool call."""
-    line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
-    # Opened without waiting, so that a pipe that nothing reads any more fails at once. The write then waits until the
-    # agent has read a message that's longer than the pipe holds.
+    # Opened without waiting, so that it fails at once when no launcher holds the pipe open. The write then waits
+    # while the launcher reads a message that's longer than the pipe holds.
     descriptor = os.open(input_path, os.O_WRONLY | os.O_NONBLOCK)
     os.set_blocking(descriptor, True)
     with os.fdopen(descriptor, "wb") as pipe:
-        pipe.write(line.encode())
+        pipe.write(message_line(text))
+
+
+def message_line(text: str) -> bytes:
+    return (json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n").encode()
 
 
 def handle(session: Session, line: bytes) -> None:

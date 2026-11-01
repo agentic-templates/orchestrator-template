@@ -27,10 +27,6 @@ def preloaded_skills(agent_type: str) -> list[str]:
     return list(dict.fromkeys(skills))
 
 
-def without_front_matter(text: str) -> str:
-    return text.split("---", 2)[2]
-
-
 def names_skill(text: str, skill: str) -> bool:
     """Whether the text names the skill as `planning`, "the planning skill" or a path to its folder."""
     return bool(re.search(rf"`{skill}`|\b{skill}`? skill\b|skills/{skill}(?![\w-])", text))
@@ -47,7 +43,7 @@ class PreloadTest(unittest.TestCase):
                 for skill in preloaded
                 if skill in names
             }
-            texts[f".claude/agents/{agent_file.name}"] = without_front_matter(agent_file.read_text())
+            texts[f".claude/agents/{agent_file.name}"] = usage.without_front_matter(agent_file.read_text())
             for path, text in texts.items():
                 for skill in names:
                     if skill not in preloaded and names_skill(text, skill):
