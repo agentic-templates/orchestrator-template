@@ -49,7 +49,7 @@ MAINTAINER = LOOP / "maintainer.json"
 WATCH_PID = LOOP / "watch.pid"
 SENDER_PID = LOOP / "send-clear.pid"
 # Tells scripts/editor to take the input box's text rather than open the maintainer's editor, while scripts/send-clear
-# takes the text. The editor deletes it once it has taken the text.
+# takes the text. scripts/editor deletes it once it has taken the text.
 TAKING_INPUT = LOOP / "taking-input"
 # The context window of each model on each account, as Claude Code reported it at the end of an agent's turn.
 CONTEXT_WINDOWS = LOOP / "context-windows.json"

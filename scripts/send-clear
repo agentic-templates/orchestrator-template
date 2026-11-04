@@ -11,15 +11,16 @@ orchestrator's session started in, and only while no turn runs and no dialog sho
 
 - the maintainer wrote to the orchestrator in the last {active_minutes} minutes. It stops waiting for this once the
   orchestrator's context passes the point where the orchestrator refreshes even while the maintainer writes to it.
-- the maintainer has text typed in the input box. Text left unchanged for {abandoned_seconds} seconds during the
-  current refresh counts as abandoned. scripts/send-clear moves it to .loop/unsent/ with Ctrl+G and scripts/editor,
-  and the new session never sees it. If Ctrl+G leaves the text in the input box, scripts/send-clear deletes it.
+- the maintainer has text typed in the input box. Text left unchanged for {abandoned_seconds} seconds since the
+  current refresh was requested counts as abandoned. scripts/send-clear moves it to .loop/unsent/ with Ctrl+G and
+  scripts/editor, and the new session never sees it. If Ctrl+G leaves the text in the input box, scripts/send-clear
+  deletes it, and the text is lost.
 
 It tells whether a turn is running from the transcript as well as the screen, because Claude Code hides its
 spinner while it writes a long answer.
 
 It writes what it waits for to .loop/refresh-waiting, and stops when a tool call after the request cancels the
-refresh. If it can't type into the terminal, it says why in .loop/refresh-waiting and stops.
+refresh. If it can't refresh, it says why in .loop/refresh-waiting and stops.
 """
 
 import argparse
@@ -195,7 +196,10 @@ def clear(pane: str) -> None:
         if not refreshing.REQUEST.exists() and shown.box == "" and send(pane, "Continue the loop."):
             return
     if refreshing.REQUEST.exists():
-        raise CantSend(f"/clear didn't start a new session within {START_SECONDS} seconds")
+        raise CantSend(
+            f"/clear didn't start a new session within {START_SECONDS} seconds. Look at the orchestrator's pane for "
+            "what holds it up, such as a dialog or /clear left in the input box"
+        )
     # The new session started, so the refresh happened, though "Continue the loop." couldn't be typed into it.
 
 
