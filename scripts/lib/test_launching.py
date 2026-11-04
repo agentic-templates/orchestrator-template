@@ -20,6 +20,7 @@ CLAUDE = usage.Account("claude", "claude", None)
 CLAUDE_2 = usage.Account("claude-2", "claude", "~/.claude-2")
 ACCOUNTS = [CLAUDE, CLAUDE_2, usage.Account("codex", "codex", None)]
 WORKTREE = launching.WORKTREES / "builder-1-test"
+RULES = "# How to work here\n"
 
 
 def decisions(claude_room: int, claude_2_room: int, codex_room: int = 5) -> dict[str, meter.Decision]:
@@ -76,11 +77,11 @@ class SettingsTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def test_the_sandbox_lets_an_agent_write_only_its_own_uv_cache(self):
-        writable = json.loads(launching.settings(WORKTREE))["sandbox"]["filesystem"]["allowWrite"]
+        writable = json.loads(launching.settings(WORKTREE, RULES))["sandbox"]["filesystem"]["allowWrite"]
         self.assertEqual(writable, [str(launching.UV_CACHE)])
 
     def test_an_agent_cant_run_a_command_outside_the_sandbox(self):
-        self.assertIs(json.loads(launching.settings(WORKTREE))["sandbox"]["allowUnsandboxedCommands"], False)
+        self.assertIs(json.loads(launching.settings(WORKTREE, RULES))["sandbox"]["allowUnsandboxedCommands"], False)
 
     def test_an_agent_cant_read_secrets_or_account_folders_but_can_read_what_gh_and_git_need(self):
         folder = tempfile.TemporaryDirectory()
@@ -91,7 +92,7 @@ class SettingsTest(unittest.TestCase):
         accounts = home / "accounts.json"
         accounts.write_text(json.dumps([{"name": "claude-2", "provider": "claude", "home": str(home / ".claude-2")}]))
         with mock.patch.object(Path, "home", lambda: home), mock.patch.object(launching.usage, "ACCOUNTS", accounts):
-            settings = json.loads(launching.settings(WORKTREE))
+            settings = json.loads(launching.settings(WORKTREE, RULES))
         denied = settings["permissions"]["deny"]
         expected = [
             "Read(~/.netrc)",
@@ -125,7 +126,7 @@ class SettingsTest(unittest.TestCase):
         (main / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"deny": deny}, "sandbox": {}}))
         worktree = Path(folder.name) / "worktree"
         with mock.patch.object(launching, "ROOT", main):
-            denied = json.loads(launching.settings(worktree))["permissions"]["deny"]
+            denied = json.loads(launching.settings(worktree, RULES))["permissions"]["deny"]
         for checkout in (main, worktree):
             with self.subTest(checkout=checkout):
                 in_checkout = [rule for rule in denied if rule.startswith((f"Read(/{checkout}/", f"Edit(/{checkout}/"))]
@@ -148,12 +149,12 @@ class SettingsTest(unittest.TestCase):
         }
         (main / ".claude" / "settings.json").write_text(json.dumps(project))
         with mock.patch.object(launching, "ROOT", main):
-            settings = json.loads(launching.settings(WORKTREE))
+            settings = json.loads(launching.settings(WORKTREE, RULES))
         self.assertEqual(settings["env"], project["env"])
         self.assertEqual(settings["hooks"]["Stop"], project["hooks"]["Stop"])
 
     def test_the_write_guard_checks_the_file_tools_against_the_agents_worktree(self):
-        hooks = json.loads(launching.settings(WORKTREE))["hooks"]["PreToolUse"]
+        hooks = json.loads(launching.settings(WORKTREE, RULES))["hooks"]["PreToolUse"]
         guards = [entry for entry in hooks if entry["matcher"] == "Edit|Write|NotebookEdit"]
         self.assertEqual(len(guards), 1)
         # It starts as an MCP server does, which McpServersTest checks.
@@ -162,13 +163,29 @@ class SettingsTest(unittest.TestCase):
 
     def test_a_write_guard_that_cant_start_refuses_the_call(self):
         with mock.patch.object(launching, "WRITE_GUARD", Path("/nonexistent/write-guard")):
-            hooks = json.loads(launching.settings(WORKTREE))["hooks"]["PreToolUse"]
+            hooks = json.loads(launching.settings(WORKTREE, RULES))["hooks"]["PreToolUse"]
         command = hooks[-1]["hooks"][0]["command"]
         ran = subprocess.run(["/bin/sh", "-c", command], input="{}", capture_output=True, text=True, check=False)
         self.assertEqual(ran.returncode, 2)
 
+    def test_each_subagent_gets_the_rules_as_its_context(self):
+        rules = "Don't run $(touch made-by-hook) or `touch made-by-hook`; 100% of 'quotes'\nand \\n stay.\n"
+        hooks = json.loads(launching.settings(WORKTREE, rules))["hooks"]["SubagentStart"]
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        ran = subprocess.run(
+            ["/bin/sh", "-c", hooks[-1]["hooks"][0]["command"]],
+            cwd=folder.name,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        output = json.loads(ran.stdout)["hookSpecificOutput"]
+        self.assertEqual(output, {"hookEventName": "SubagentStart", "additionalContext": rules})
+        self.assertEqual(os.listdir(folder.name), [])
+
     def test_an_agent_cant_move_its_session_to_another_worktree(self):
-        self.assertIn("EnterWorktree", json.loads(launching.settings(WORKTREE))["permissions"]["deny"])
+        self.assertIn("EnterWorktree", json.loads(launching.settings(WORKTREE, RULES))["permissions"]["deny"])
 
 
 class AgentVariablesTest(unittest.TestCase):
@@ -271,7 +288,7 @@ class StartTest(unittest.TestCase):
 
     def start(self, resumes: bool) -> tuple[dict[str, str], str, list[str]]:
         """The agent's environment, its first message and its command."""
-        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "The rules.")
+        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "The rules.", "The rules.")
         with mock.patch.object(launching.usage, "transcript", lambda account, session: resumes):
             launching.start(ACCOUNTS[0], builder, "builder-1-test", self.folder, "Build issue #1.", "session")
         message = json.loads(read_line(self.agent_input))["message"]["content"]
@@ -286,6 +303,11 @@ class StartTest(unittest.TestCase):
         _, _, command = self.start(resumes=False)
         guard = json.loads(command[command.index("--settings") + 1])["hooks"]["PreToolUse"][-1]["hooks"][0]
         self.assertIn(str(self.folder), shlex.split(guard["command"]))
+
+    def test_an_agents_subagents_get_its_rules(self):
+        _, _, command = self.start(resumes=False)
+        hooks = json.loads(command[command.index("--settings") + 1])["hooks"]["SubagentStart"]
+        self.assertIn("The rules.", hooks[-1]["hooks"][0]["command"])
 
     def test_an_agent_doesnt_inherit_an_effort_that_would_override_its_types(self):
         environment, _, _ = self.start(resumes=False)
@@ -329,7 +351,7 @@ class StartTest(unittest.TestCase):
         self.assertEqual(message, "Build issue #1.")
 
     def test_the_launcher_goes_on_while_a_long_first_message_waits_for_the_agent(self):
-        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "x" * 100_000)
+        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "", "x" * 100_000)
         with mock.patch.object(launching.usage, "transcript", lambda account, session: False):
             starting = threading.Thread(
                 target=launching.start,
@@ -413,6 +435,7 @@ class AgentTypeFromMainTest(unittest.TestCase):
             "# Building\n\n# Code"
         )
         self.assertEqual(builder.instructions, expected)
+        self.assertEqual(builder.rules, expected.removesuffix("\n\n# Building\n\n# Code"))
 
     def test_an_agent_doesnt_start_without_a_skill_its_type_preloads(self):
         with self.assertRaises(SystemExit) as raised:
@@ -446,7 +469,7 @@ class AgentTypeFromMainTest(unittest.TestCase):
 
 class AgentArgumentsTest(unittest.TestCase):
     def arguments(self, fields: dict) -> list[str]:
-        return launching.agent_arguments(launching.AgentType("builder-x", fields, "You build one issue.", ""))
+        return launching.agent_arguments(launching.AgentType("builder-x", fields, "You build one issue.", "", ""))
 
     def test_the_agent_type_keeps_its_prompt_model_and_tools_but_not_its_hooks_or_mcp_servers(self):
         fields = {"description": "Builds.", "model": "opus", "tools": "Bash, Read", "hooks": "", "mcpServers": ""}

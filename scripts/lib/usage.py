@@ -505,6 +505,8 @@ def definition_fields(definition: str) -> dict[str, str | list[str]]:
     fields: dict[str, str | list[str]] = {}
     key = ""
     for line in definition.split("---")[1].splitlines():
+        if not line.strip():
+            continue
         if line.strip().startswith("-") and key:
             fields[key] = [*(fields[key] or []), line.strip().removeprefix("-").strip()]
             continue

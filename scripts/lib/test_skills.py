@@ -2,6 +2,7 @@ import re
 import unittest
 from pathlib import Path
 
+import launching
 import usage
 
 # The launcher reads agent files from main, but a branch's own agent files and skills are in the checkout that holds
@@ -30,6 +31,20 @@ def preloaded_skills(agent_type: str) -> list[str]:
 def names_skill(text: str, skill: str) -> bool:
     """Whether the text names the skill as `planning`, "the planning skill" or a path to its folder."""
     return bool(re.search(rf"`{skill}`|\b{skill}`? skill\b|skills/{skill}(?![\w-])", text))
+
+
+class AgentFieldsTest(unittest.TestCase):
+    def test_launched_agent_types_set_only_fields_the_launcher_passes(self):
+        # Claude Code loads the orchestrator's file itself, with every field it supports.
+        for agent_file in (path for path in AGENT_FILES if path.stem != "orchestrator"):
+            for field in usage.definition_fields(agent_file.read_text()):
+                with self.subTest(agent_file=agent_file.name, field=field):
+                    self.assertIn(
+                        field,
+                        launching.AGENT_FIELDS,
+                        f".claude/agents/{agent_file.name} sets {field}, which the launcher doesn't pass to agents, so "
+                        "it does nothing. Remove it.",
+                    )
 
 
 class PreloadTest(unittest.TestCase):
