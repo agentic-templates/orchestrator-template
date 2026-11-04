@@ -56,7 +56,6 @@ class RefreshWhileGitHubFailsTest(TemporaryLoopTest):
         refreshing.STATE.write_text("# Goal\nShip the importer, waiting on #12 and #15.\n")
         code, output = self.run_script("refresh")
         self.assertEqual(code, 0)
-        self.assertIn("closed: #12, #15.", output)
-        self.assertIn("error connecting to api.github.com", output)
+        self.assertIn("- #12: error connecting to api.github.com\n- #15: error connecting to api.github.com", output)
         self.assertEqual(self.run_script("refresh", "--ready")[0], 0)
         self.assertTrue(refreshing.REQUEST.exists())

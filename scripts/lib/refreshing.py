@@ -104,7 +104,7 @@ def request(transcript: str | None) -> None:
 
 
 def start_sender() -> None:
-    """Starts scripts/send-clear in a session of its own, which outlives the script that starts it. Its output goes
+    """Starts scripts/send-clear in a process session of its own, which outlives the script that starts it. Its output goes
     nowhere, because a process that keeps the Stop hook's output open can hold up Claude Code until it exits."""
     subprocess.Popen(
         [str(usage.ROOT / "scripts" / "send-clear")],

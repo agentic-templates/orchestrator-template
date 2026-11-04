@@ -11,9 +11,9 @@ orchestrator's session started in, and only while no turn runs and no dialog sho
 
 - the maintainer wrote to the orchestrator in the last {active_minutes} minutes. It stops waiting for this once the
   orchestrator's context passes the point where the orchestrator refreshes even while the maintainer writes to it.
-- the maintainer has text typed in the input box. Text left unchanged for {abandoned_seconds} seconds counts as
-  abandoned. scripts/send-clear moves it to .loop/unsent/ with Ctrl+G and scripts/editor, and the new session never
-  sees it. If Ctrl+G leaves the text in the input box, scripts/send-clear deletes it.
+- the maintainer has text typed in the input box. Text left unchanged for {abandoned_seconds} seconds during the
+  current refresh counts as abandoned. scripts/send-clear moves it to .loop/unsent/ with Ctrl+G and scripts/editor,
+  and the new session never sees it. If Ctrl+G leaves the text in the input box, scripts/send-clear deletes it.
 
 It tells whether a turn is running from the transcript as well as the screen, because Claude Code hides its
 spinner while it writes a long answer.
@@ -147,9 +147,9 @@ def is_busy(shown: terminal.Screen) -> bool:
     return shown.is_busy or bool(transcript and refreshing.turn_running(Path(transcript)))
 
 
-def get_ready(pane: str, request_time: float) -> bool:
-    """Whether the session is idle with an empty input box. When it isn't, this waits one check and records why, or
-    takes the maintainer's abandoned text out of the input box."""
+def advance_towards_ready(pane: str, request_time: float) -> bool:
+    """Says whether the session is ready for /clear: idle, with an empty input box. When it isn't, this waits one
+    check and records why, or takes the maintainer's abandoned text out of the input box."""
     shown = screen(pane)
     if is_busy(shown):
         wait_one_check("a turn is running")
@@ -181,7 +181,7 @@ def send(pane: str, text: str) -> bool:
 
 def clear(pane: str) -> None:
     while (saved := refreshing.load_request()) and not refreshing.is_cancelled(saved):
-        if get_ready(pane, saved["time"]) and send(pane, "/clear"):
+        if advance_towards_ready(pane, saved["time"]) and send(pane, "/clear"):
             break
     else:
         return

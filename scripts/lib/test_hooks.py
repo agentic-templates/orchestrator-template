@@ -215,8 +215,9 @@ class SessionStartStatusTest(HookTest):
     def test_a_failed_status_is_marked_as_failed(self):
         status_context = self.load_script("hooks/session-start")["status_context"]
         context = status_context(1, "## Running agents\nNone\n", "Traceback (most recent call last):\n")
-        self.assertTrue(context.startswith("# scripts/status --save failed with exit status 1\n\n## Running agents"))
-        self.assertIn("Traceback", context)
+        self.assertTrue(context.startswith("# scripts/status --save failed with exit status 1\n\n"))
+        self.assertIn("Run scripts/status before you start or stop agents.", context)
+        self.assertIn("## Running agents\nNone\nTraceback", context)
 
     def test_the_status_is_given_under_its_heading(self):
         status_context = self.load_script("hooks/session-start")["status_context"]

@@ -46,7 +46,8 @@ class TemporaryLoopTest(unittest.TestCase):
         os.environ["TMUX_TMPDIR"] = str(self.root)
 
     def run_script(self, script: str, *arguments: str, stdin: str = "") -> tuple[int, str]:
-        """Runs scripts/<script> as its own process would, and gives its exit status and what it printed."""
+        """Runs scripts/<script> in the test's process, with the test's patches, and gives its exit status, from the
+        SystemExit it raises, and what it printed to stdout."""
         output = io.StringIO()
         with (
             mock.patch("sys.stdin", io.StringIO(stdin)),

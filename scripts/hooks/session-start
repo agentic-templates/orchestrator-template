@@ -44,7 +44,7 @@ ANOTHER_ORCHESTRATOR_CONTEXT = (
 LONG_STATES_TO_REPORT = 2
 LONG_STATE_NOTE = (
     f"Your saved state was over {refreshing.LONG_STATE:,} characters at each of the last {LONG_STATES_TO_REPORT} "
-    "refreshes. Send the maintainer a notification saying so, without quoting it, so that they can look at "
+    "refreshes. Send the maintainer a notification saying so, without quoting the state, so that they can look at "
     ".loop/state.md."
 )
 
@@ -54,8 +54,7 @@ def skill(name: str) -> str:
 
 
 def take_over(provider: str) -> None:
-    """Records the orchestrator's account, and the tmux pane that scripts/send-clear types /clear into. Also
-    forgets the refresh request, the failed refresh and the notices of the session before."""
+    """Records the orchestrator's account, and the tmux pane that scripts/send-clear types /clear into."""
     usage.LOOP.mkdir(exist_ok=True)
     account = usage.account_of(dict(os.environ), provider)
     pid = usage.this_session()
@@ -77,11 +76,11 @@ def state() -> str:
         refreshing.LONG_STATES.unlink()
         long_note = LONG_STATE_NOTE + "\n\n"
     saved = refreshing.STATE.read_text().strip()
-    before = long_note + "# Your saved state (.loop/state.md)\n\n"
-    if len(before) + len(saved) > MAX_CHARACTERS:
+    above_state = long_note + "# Your saved state (.loop/state.md)\n\n"
+    if len(above_state) + len(saved) > MAX_CHARACTERS:
         cut = "\n\n[This is the first part of .loop/state.md. Read the rest of the file.]"
-        saved = saved[: MAX_CHARACTERS - len(before) - len(cut)] + cut
-    return before + saved
+        saved = saved[: MAX_CHARACTERS - len(above_state) - len(cut)] + cut
+    return above_state + saved
 
 
 def status() -> str:
@@ -96,7 +95,10 @@ def status_context(code: int, output: str, errors: str) -> str:
     an error for the loop's status."""
     if code == 0:
         return f"# The loop's status\n\n{output}"
-    return f"# scripts/status --save failed with exit status {code}\n\n{output}{errors}"
+    return (
+        f"# scripts/status --save failed with exit status {code}\n\nWhat it printed is below, and may be incomplete. "
+        f"Run scripts/status before you start or stop agents.\n\n{output}{errors}"
+    )
 
 
 def respond(context: str, message: str | None = None) -> None:
@@ -104,7 +106,7 @@ def respond(context: str, message: str | None = None) -> None:
     if len(context) > MAX_CHARACTERS:
         context = (
             context[: MAX_CHARACTERS - 100]
-            + f"\n\n[The rest is cut, at the hook's limit of {MAX_CHARACTERS:,} characters.]"
+            + f"\n\n[Cut at the hook's limit of {MAX_CHARACTERS:,} characters. Run scripts/status for the rest.]"
         )
     output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     print(json.dumps(output | ({"systemMessage": message} if message else {})))

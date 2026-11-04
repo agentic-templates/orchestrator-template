@@ -51,11 +51,11 @@ def show_checklist() -> None:
         print("\nThe script found these in .loop/state.md. Each can still be right, so change only what's out of date:")
         print("\n".join(f"- {finding}" for finding in found))
     if failed:
-        numbers = ", ".join(f"#{number}" for number in failed)
         print(
-            f"\nThe script couldn't check whether these issues or pull requests are closed: {numbers}. "
-            f"gh failed: {next(iter(failed.values()))}"
+            "\nThe script couldn't check whether these issues or pull requests are closed, because gh failed. Leave "
+            "their entries in .loop/state.md as they are:"
         )
+        print("\n".join(f"- #{number}: {error}" for number, error in failed.items()))
     print("\nThen run scripts/refresh --ready as the last step of your turn.")
     refreshing.CHECKED.write_text(str(time.time()))
 
