@@ -9,6 +9,7 @@ import watching
 from temporary_loop import Clock, TemporaryLoopTest
 
 NOW = 1_792_540_000.0
+REQUEST_TIME = NOW - 30
 
 
 class SendClearTest(TemporaryLoopTest):
@@ -40,19 +41,25 @@ class SendClearTest(TemporaryLoopTest):
 
     def test_text_left_unchanged_for_two_minutes_is_abandoned(self):
         is_abandoned = self.send_clear["is_abandoned"]
-        self.assertFalse(is_abandoned("Can you look at"))
+        self.assertFalse(is_abandoned("Can you look at", REQUEST_TIME))
         self.clock.sleep(119)
-        self.assertFalse(is_abandoned("Can you look at"))
+        self.assertFalse(is_abandoned("Can you look at", REQUEST_TIME))
         self.clock.sleep(1)
-        self.assertTrue(is_abandoned("Can you look at"))
+        self.assertTrue(is_abandoned("Can you look at", REQUEST_TIME))
 
     def test_text_that_changed_counts_from_its_change(self):
         is_abandoned = self.send_clear["is_abandoned"]
-        self.assertFalse(is_abandoned("Can you look at"))
+        self.assertFalse(is_abandoned("Can you look at", REQUEST_TIME))
         self.clock.sleep(119)
-        self.assertFalse(is_abandoned("Can you look at #12"))
+        self.assertFalse(is_abandoned("Can you look at #12", REQUEST_TIME))
         self.clock.sleep(119)
-        self.assertFalse(is_abandoned("Can you look at #12"))
+        self.assertFalse(is_abandoned("Can you look at #12", REQUEST_TIME))
+
+    def test_text_seen_at_an_earlier_refresh_counts_from_this_one(self):
+        is_abandoned = self.send_clear["is_abandoned"]
+        self.assertFalse(is_abandoned("ok", REQUEST_TIME))
+        self.clock.sleep(3 * 3600)
+        self.assertFalse(is_abandoned("ok", NOW + 3 * 3600 - 30))
 
     def orchestrate(self, current: int, wrote_minutes_ago: float) -> None:
         """An orchestrator on a 1M window that started at 30,000 tokens, with the time the maintainer last wrote."""

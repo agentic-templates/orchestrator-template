@@ -89,11 +89,13 @@ def maintainer_is_writing() -> bool:
     return context.current < thresholds.compute(limits, context.start, context.growth()).while_active
 
 
-def is_abandoned(text: str) -> bool:
-    """Whether the box has shown the same text for long enough. The time counts across senders."""
+def is_abandoned(text: str, request_time: float) -> bool:
+    """Whether the box has shown the same text for long enough since the refresh was requested. The time counts
+    across senders, such as the watcher's retry, but starts again at a new request, because the maintainer may type
+    the same short text, such as "ok", again."""
     typed: dict = json.loads(TYPED.read_text()) if TYPED.exists() else {}
-    if typed.get("text") != text:
-        typed = {"text": text, "since": time.time()}
+    if typed.get("text") != text or typed.get("request") != request_time:
+        typed = {"text": text, "request": request_time, "since": time.time()}
         TYPED.write_text(json.dumps(typed))
     return time.time() - typed["since"] >= ABANDONED_SECONDS
 
@@ -122,7 +124,7 @@ def is_busy(shown: terminal.Screen) -> bool:
     return shown.is_busy or bool(transcript and refreshing.turn_running(Path(transcript)))
 
 
-def is_ready(pane: str) -> bool:
+def is_ready(pane: str, request_time: float) -> bool:
     """Whether the session is idle with an empty box, waiting for the reason when it isn't."""
     shown = screen(pane)
     if is_busy(shown):
@@ -131,7 +133,7 @@ def is_ready(pane: str) -> bool:
         wait_for("a dialog is open")
     elif maintainer_is_writing():
         wait_for("the maintainer wrote to the orchestrator in the last few minutes")
-    elif shown.box and not is_abandoned(shown.box):
+    elif shown.box and not is_abandoned(shown.box, request_time):
         wait_for("the maintainer has text in the input box")
     elif shown.box:
         take_text(pane)
@@ -155,7 +157,7 @@ def send(pane: str, text: str) -> bool:
 
 def clear(pane: str) -> None:
     while (saved := refreshing.load_request()) and not refreshing.is_cancelled(saved):
-        if is_ready(pane) and send(pane, "/clear"):
+        if is_ready(pane, saved["time"]) and send(pane, "/clear"):
             break
     else:
         return
