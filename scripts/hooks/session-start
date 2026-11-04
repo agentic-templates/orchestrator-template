@@ -35,17 +35,16 @@ NOT_ORCHESTRATED_CONTEXT = (
     "You weren't started with scripts/orchestrate, so refreshes and agent launches may fail. Tell the maintainer "
     "to start you again with scripts/orchestrate, and start no agents until then."
 )
-# A worktree of the checkout shares its .loop folder, so only a separate clone has records of its own.
+# A session in a worktree gets this message too, and one in another clone becomes a second orchestrator.
 ANOTHER_ORCHESTRATOR_CONTEXT = (
-    "Another orchestrator runs in this checkout, as process {pid}, so this session isn't the orchestrator. Tell the "
-    "maintainer to quit this session, and to open sessions for work of their own in a separate clone of the "
-    "repository."
+    "An orchestrator already runs in this checkout, as process {pid}, so this session isn't the orchestrator. Tell "
+    "the maintainer to quit this session. For work of their own, they can open sessions in a folder outside every "
+    "checkout of this repository."
 )
 LONG_STATES_TO_REPORT = 2
 LONG_STATE_NOTE = (
-    f"Your saved state was over {refreshing.LONG_STATE:,} characters at each of the last {LONG_STATES_TO_REPORT} "
-    "refreshes. Send the maintainer a notification saying so, without quoting the state, so that they can look at "
-    ".loop/state.md."
+    "Send the maintainer this notification: \"The orchestrator's saved state was long at each of the last "
+    f'{LONG_STATES_TO_REPORT} refreshes. Look at .loop/state.md for what keeps it long."'
 )
 
 
@@ -105,8 +104,7 @@ def respond(context: str, message: str | None = None) -> None:
     """Gives the model the context, and shows the maintainer the message, if any."""
     if len(context) > MAX_CHARACTERS:
         context = (
-            context[: MAX_CHARACTERS - 100]
-            + f"\n\n[Cut at the hook's limit of {MAX_CHARACTERS:,} characters. Run scripts/status for the rest.]"
+            context[: MAX_CHARACTERS - 100] + "\n\n[The rest of the status was cut off. Run scripts/status to see it.]"
         )
     output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     print(json.dumps(output | ({"systemMessage": message} if message else {})))

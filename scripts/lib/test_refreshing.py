@@ -45,8 +45,7 @@ class FindingsTest(unittest.TestCase):
     def test_a_state_is_reported_once_it_is_over_the_limit(self):
         self.assertEqual(findings("a" * LONG_STATE, closed=set()), [])
         reported = (
-            f"The state has {LONG_STATE + 1:,} characters, over {LONG_STATE:,}. Look for entries that an issue or a "
-            "pull request records, or that scripts/status lists."
+            "The state is long. Look for entries that an issue or a pull request records, or that scripts/status lists."
         )
         self.assertEqual(findings("a" * (LONG_STATE + 1), closed=set()), [reported])
 

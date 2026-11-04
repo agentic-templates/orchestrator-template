@@ -47,7 +47,8 @@ class AutoMergeTest(HookTest):
         self.stand_in_gh('echo "GraphQL: Pull request Auto merge is not allowed for this repository" >&2\nexit 1')
         output = self.open_pull_request("gh pr create --title 'fix: x' --body-file body.md")
         self.assertIn(
-            f"Auto-merge isn't on for {self.URL}, so the pull request won't merge by itself. Say so in your report.",
+            f"Turning on auto-merge for {self.URL} failed, so the pull request won't merge by itself. Say so in your "
+            "report.",
             output,
         )
         self.assertIn("Auto merge is not allowed for this repository", output)
@@ -170,7 +171,7 @@ class SessionStartTest(HookTest):
         refreshing.REQUEST.write_text("{}")
         output = json.loads(self.start({"source": "startup"}, "skills", "claude"))
         context = output["hookSpecificOutput"]["additionalContext"]
-        self.assertIn(f"Another orchestrator runs in this checkout, as process {pid}", context)
+        self.assertIn(f"An orchestrator already runs in this checkout, as process {pid}", context)
         self.assertTrue(refreshing.REQUEST.exists())
         self.assertEqual(self.start({"source": "startup"}, "state"), "")
 
@@ -199,7 +200,12 @@ class SessionStartStateTest(HookTest):
         refreshing.STATE.write_text("a" * 15_000)
         refreshing.LONG_STATES.write_text("2")
         context = self.state()
-        self.assertTrue(context.startswith("Your saved state was over 6,000 characters"))
+        self.assertTrue(
+            context.startswith(
+                "Send the maintainer this notification: \"The orchestrator's saved state was long at each of the last 2 "
+                "refreshes."
+            )
+        )
         self.assertLessEqual(len(context), 10_000)
         self.assertTrue(context.endswith(self.CUT))
         self.assertFalse(refreshing.LONG_STATES.exists())

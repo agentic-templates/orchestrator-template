@@ -68,8 +68,7 @@ def findings(text: str, closed: set[int]) -> list[str]:
     ]
     if len(text) > LONG_STATE:
         found.append(
-            f"The state has {len(text):,} characters, over {LONG_STATE:,}. Look for entries that an issue or a pull "
-            "request records, or that scripts/status lists."
+            "The state is long. Look for entries that an issue or a pull request records, or that scripts/status lists."
         )
     return found
 

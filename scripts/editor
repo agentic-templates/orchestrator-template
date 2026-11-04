@@ -6,11 +6,9 @@
 
 usage: scripts/editor <file>
 
-Claude Code passes it a file that holds the input box's text. While scripts/send-clear takes text that was typed
-into the orchestrator's input box but never sent, scripts/editor moves the text from that file to .loop/unsent/ and
-leaves the file empty, so that the box comes back empty. It then deletes .loop/taking-input, which tells
-scripts/send-clear that the text is taken. At any other time, it opens the file in the editor that LOOP_EDITOR
-names, which scripts/orchestrate sets to the maintainer's own.
+When scripts/send-clear takes text out of the orchestrator's input box, scripts/editor saves the text to
+.loop/unsent/, and the input box comes back empty. At any other time, scripts/editor opens the maintainer's own
+editor: $VISUAL, or else $EDITOR, or else vi.
 """
 
 import os
