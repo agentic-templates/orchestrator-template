@@ -81,8 +81,8 @@ def request(transcript: str | None) -> None:
     # A tool call after a request cancels it, and the orchestrator prunes the state again before it requests the
     # refresh again. So a session's last request replaces its earlier one in the count and the log. Sessions are told
     # apart by their transcripts, which a request has once the status line has recorded the session's.
-    is_again = transcript is not None and bool(logged) and logged[-1].get("transcript") == transcript
-    if is_again:
+    replaces_last_logged = transcript is not None and bool(logged) and logged[-1].get("transcript") == transcript
+    if replaces_last_logged:
         long_states_before = logged.pop().get("long_states_before", 0)
     else:
         long_states_before = int(LONG_STATES.read_text()) if LONG_STATES.exists() else 0
@@ -96,7 +96,7 @@ def request(transcript: str | None) -> None:
         "long_states_before": long_states_before,
     }
     LOG.parent.mkdir(exist_ok=True)
-    if is_again:
+    if replaces_last_logged:
         usage.write_atomically(LOG, "".join(json.dumps(line) + "\n" for line in [*logged, entry]))
         return
     with open(LOG, "a") as file:
@@ -104,8 +104,9 @@ def request(transcript: str | None) -> None:
 
 
 def start_sender() -> None:
-    """Starts scripts/send-clear in a process session of its own, which outlives the script that starts it. Its output goes
-    nowhere, because a process that keeps the Stop hook's output open can hold up Claude Code until it exits."""
+    """Starts scripts/send-clear in a process session of its own, which outlives the script that starts it. Its
+    output goes nowhere, because a process that keeps the Stop hook's output open can hold up Claude Code until it
+    exits."""
     subprocess.Popen(
         [str(usage.ROOT / "scripts" / "send-clear")],
         stdin=subprocess.DEVNULL,

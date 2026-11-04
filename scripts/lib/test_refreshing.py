@@ -178,7 +178,7 @@ class ForgetLastSessionTest(TemporaryLoopTest):
         usage.notify(usage.ORCHESTRATOR_ID, "context", "Refresh soon.")
         self.assertEqual(usage.untold_notices(usage.ORCHESTRATOR_ID), ["Refresh soon."])
 
-    def test_a_new_session_drops_the_request_the_shown_checklist_and_a_failed_refresh(self):
+    def test_a_new_session_drops_the_request_the_shown_checklist_the_senders_reason_and_a_failed_refresh(self):
         for path in (refreshing.REQUEST, refreshing.CHECKED, refreshing.WAITING, refreshing.FAILED):
             path.write_text("")
         refreshing.forget_last_session()

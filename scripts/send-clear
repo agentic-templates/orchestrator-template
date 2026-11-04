@@ -148,9 +148,9 @@ def is_busy(shown: terminal.Screen) -> bool:
     return shown.is_busy or bool(transcript and refreshing.turn_running(Path(transcript)))
 
 
-def advance_towards_ready(pane: str, request_time: float) -> bool:
-    """Says whether the session is ready for /clear: idle, with an empty input box. When it isn't, this waits one
-    check and records why, or takes the maintainer's abandoned text out of the input box."""
+def is_ready_for_clear(pane: str, request_time: float) -> bool:
+    """Whether the session is ready for /clear: idle, with an empty input box. When it isn't, this waits one check
+    and records why, or takes the maintainer's abandoned text out of the input box, before it answers no."""
     shown = screen(pane)
     if is_busy(shown):
         wait_one_check("a turn is running")
@@ -182,7 +182,7 @@ def send(pane: str, text: str) -> bool:
 
 def clear(pane: str) -> None:
     while (saved := refreshing.load_request()) and not refreshing.is_cancelled(saved):
-        if advance_towards_ready(pane, saved["time"]) and send(pane, "/clear"):
+        if is_ready_for_clear(pane, saved["time"]) and send(pane, "/clear"):
             break
     else:
         return

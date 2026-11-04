@@ -21,7 +21,9 @@ SESSION_VARIABLES = ("CLAUDE_PID", "CLAUDE_CONFIG_DIR", "LOOP_AGENT_ID", "LOOP_O
 
 class TemporaryLoopTest(unittest.TestCase):
     """Points every path under .loop in usage, refreshing and watching at a temporary .loop, and usage.ROOT at the
-    folder that holds it, so that a script under test can't read or change the real loop or start its scripts."""
+    folder that holds it, so that a script under test can't read or change the real loop or start its scripts.
+    The session-start hook finds scripts/status from a root of its own, which this doesn't patch, so a test that
+    runs the hook's status part would run the real scripts/status."""
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
