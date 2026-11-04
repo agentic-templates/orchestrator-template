@@ -35,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import contexts
 import refreshing
 import terminal
-import thresholds
 import usage
 import watching
 
@@ -85,14 +84,14 @@ def wait_for(reason: str) -> None:
 def maintainer_is_writing() -> bool:
     """Whether the maintainer wrote within the last few minutes, while the context is still below the point where
     the orchestrator refreshes even then."""
-    if usage.minutes_since_maintainer_wrote() >= watching.ACTIVE_MINUTES:
+    if not watching.is_maintainer_active():
         return False
     orchestrator = usage.orchestrator()
     context = contexts.load(watching.CONTEXTS).get(str(orchestrator.get("transcript")))
-    if context is None or context.start is None:
+    if context is None:
         return True
-    limits = watching.context_limits(context.model, orchestrator.get("window"))
-    return context.current < thresholds.compute(limits, context.start, context.growth()).while_active
+    limits = watching.session_thresholds(context, orchestrator.get("account"), orchestrator.get("window"))
+    return limits is None or context.current < limits.while_active
 
 
 def is_abandoned(text: str, request_time: float) -> bool:

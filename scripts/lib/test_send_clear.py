@@ -72,7 +72,8 @@ class SendClearTest(TemporaryLoopTest):
         self.assertGreaterEqual(self.clock.now, NOW + self.send_clear["EDITOR_SECONDS"])
 
     def orchestrate(self, current: int, wrote_minutes_ago: float) -> None:
-        """An orchestrator on a 1M window that started at 30,000 tokens, with the time the maintainer last wrote."""
+        """An orchestrator that started at 30,000 tokens on a window it hasn't reported, which is 1M unless the
+        account recorded another, with the time the maintainer last wrote."""
         context = contexts.Context(turns=2, start=30_000, current=current, model="claude-opus-5-5")
         contexts.save(watching.CONTEXTS, {"orchestrator.jsonl": context})
         usage.ORCHESTRATOR.write_text(json.dumps({"account": "claude", "transcript": "orchestrator.jsonl"}))
@@ -89,4 +90,10 @@ class SendClearTest(TemporaryLoopTest):
     def test_doesnt_wait_for_the_maintainer_once_the_context_is_near_its_limit(self):
         # Past 80% of the 1M window, where everything winds down, so past the point that waits for the maintainer.
         self.orchestrate(current=850_000, wrote_minutes_ago=1)
+        self.assertFalse(self.send_clear["maintainer_is_writing"]())
+
+    def test_the_window_recorded_for_the_orchestrators_account_and_model_counts(self):
+        usage.record_context_windows("claude", {"claude-opus-5-5": {"contextWindow": 200_000}})
+        # Past 80% of the 200k window, where the watcher already winds everything down.
+        self.orchestrate(current=170_000, wrote_minutes_ago=1)
         self.assertFalse(self.send_clear["maintainer_is_writing"]())
