@@ -47,7 +47,8 @@ class AutoMergeTest(HookTest):
         self.stand_in_gh('echo "GraphQL: Pull request Auto merge is not allowed for this repository" >&2\nexit 1')
         output = self.open_pull_request("gh pr create --title 'fix: x' --body-file body.md")
         self.assertIn(
-            f"Auto-merge isn't on for {self.URL}. Run `gh pr merge --auto --squash {self.URL}` again.", output
+            f"Auto-merge isn't on for {self.URL}, so the pull request won't merge by itself. Say so in your report.",
+            output,
         )
         self.assertIn("Auto merge is not allowed for this repository", output)
 
