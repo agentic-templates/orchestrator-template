@@ -65,15 +65,19 @@ class TemporaryLoopTest(unittest.TestCase):
         return runpy.run_path(str(SCRIPTS / script))
 
     def stand_in_gh(self, script: str) -> Path:
-        """Puts a stand-in for gh, a shell script, first on PATH, because the real one reads GitHub. It runs from
-        the temporary folder, and gives the file where it can record its arguments."""
+        """Puts a stand-in for gh first on PATH, because the real one reads GitHub, and gives the file where it can
+        record its arguments."""
+        self.stand_in("gh", script)
+        return self.root / "gh-calls"
+
+    def stand_in(self, program: str, script: str) -> None:
+        """Puts a shell script first on PATH as the program. It runs from the temporary folder."""
         folder = self.root / "bin"
         folder.mkdir(exist_ok=True)
-        gh = folder / "gh"
-        gh.write_text(f"#!/bin/sh\ncd {self.root}\n{script}\n")
-        gh.chmod(0o755)
+        path = folder / program
+        path.write_text(f"#!/bin/sh\ncd {self.root}\n{script}\n")
+        path.chmod(0o755)
         os.environ["PATH"] = f"{folder}{os.pathsep}{os.environ['PATH']}"
-        return self.root / "gh-calls"
 
 
 class Clock:

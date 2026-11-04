@@ -12,6 +12,12 @@ NOW = 1_792_540_000.0
 REQUEST_TIME = NOW - 30
 
 
+def box_screen(text: str) -> str:
+    """Claude Code's screen with the text in its input box, or its dim placeholder for an empty box."""
+    box = "❯\xa0" + (text or '\x1b[2mTry "fix lint errors"\x1b[0m')
+    return "\n".join(["⏺ An earlier answer.", "", "─" * 40, box, "─" * 40, "  five hour 2% used"]) + "\n"
+
+
 class SendClearTest(TemporaryLoopTest):
     def setUp(self):
         super().setUp()
@@ -65,11 +71,43 @@ class SendClearTest(TemporaryLoopTest):
         self.send_clear["wait_for_editor"]()
         self.assertEqual(self.clock.now, NOW)
 
-    def test_stops_with_the_reason_when_the_editor_doesnt_take_the_text_in_time(self):
+    def test_the_wait_for_the_editor_ends_at_its_deadline(self):
         (self.loop / "taking-input").write_text("")
-        with self.assertRaisesRegex(self.send_clear["CantSend"], "scripts/editor didn't take the text"):
-            self.send_clear["wait_for_editor"]()
+        self.send_clear["wait_for_editor"]()
         self.assertGreaterEqual(self.clock.now, NOW + self.send_clear["EDITOR_SECONDS"])
+
+    def show_in_tmux(self, screen: str, after_backspaces: str | None = None) -> None:
+        """A stand-in for tmux, which shows the screen until a Backspace changes it, and opens no editor."""
+        (self.root / "screen").write_text(screen)
+        if after_backspaces is not None:
+            (self.root / "after-backspaces").write_text(after_backspaces)
+        self.stand_in(
+            "tmux",
+            'echo "$@" >> tmux-calls\n'
+            'case "$*" in\n'
+            "  capture-pane*) cat screen ;;\n"
+            "  *BSpace*) [ -f after-backspaces ] && cp after-backspaces screen ;;\n"
+            "esac\n"
+            "exit 0",
+        )
+
+    def test_text_that_no_editor_takes_is_deleted(self):
+        self.show_in_tmux(box_screen("half a thought"), after_backspaces=box_screen(""))
+        typed = self.loop / "refresh-typed.json"
+        typed.write_text("{}")
+        self.send_clear["take_text"]("%3")
+        calls = (self.root / "tmux-calls").read_text()
+        self.assertIn("send-keys -t %3 C-g", calls)
+        self.assertIn("send-keys -t %3 -N 2000 BSpace", calls)
+        self.assertFalse((self.loop / "taking-input").exists())
+        self.assertFalse(typed.exists())
+
+    def test_stops_with_the_reason_when_the_input_box_stays_hidden(self):
+        dialog = "Do you want to proceed?\n❯ 1. Yes\n  2. No\n"
+        self.show_in_tmux(dialog)
+        with self.assertRaisesRegex(self.send_clear["CantSend"], "If an editor or a dialog shows"):
+            self.send_clear["take_text"]("%3")
+        self.assertFalse((self.loop / "taking-input").exists())
 
     def orchestrate(self, current: int, wrote_minutes_ago: float) -> None:
         """An orchestrator that started at 30,000 tokens on a window it hasn't reported, which is 1M unless the

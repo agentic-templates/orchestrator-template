@@ -121,19 +121,18 @@ def take_text(pane: str) -> None:
         time.sleep(1)
     # No box at all means the editor or a dialog still shows, so the text isn't taken either.
     if screen(pane).box != "":
-        raise CantSend("text in the input box couldn't be taken out of it. Empty the input box by hand")
+        raise CantSend(
+            "the input box couldn't be emptied. If an editor or a dialog shows in the orchestrator's pane, close it. "
+            "If text is left in the input box, empty it by hand"
+        )
     TYPED.unlink(missing_ok=True)
 
 
 def wait_for_editor() -> None:
-    """Waits until scripts/editor has taken the box's text, which it says by deleting .loop/taking-input."""
+    """Waits until scripts/editor has taken the box's text, which it says by deleting .loop/taking-input, or until
+    EDITOR_SECONDS have passed, such as when Ctrl+G opened no editor. take_text then looks at the screen."""
     deadline = time.time() + EDITOR_SECONDS
-    while usage.TAKING_INPUT.exists():
-        if time.time() >= deadline:
-            raise CantSend(
-                f"scripts/editor didn't take the text in the input box within {EDITOR_SECONDS} seconds of Ctrl+G. "
-                "If an editor shows in the orchestrator's pane, close it, and empty the input box by hand"
-            )
+    while usage.TAKING_INPUT.exists() and time.time() < deadline:
         time.sleep(0.5)
 
 
