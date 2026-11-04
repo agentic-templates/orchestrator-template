@@ -9,10 +9,11 @@ The Stop hook scripts/hooks/refresh starts it once the orchestrator has requeste
 --ready, and scripts/watch starts it again if the refresh hasn't happened. It types only into the tmux pane that the
 orchestrator's session started in, and only while no turn runs and no dialog shows. It waits while:
 
-- the maintainer wrote to the orchestrator in the last few minutes, unless the orchestrator's context has grown too
-  large to wait.
-- the maintainer has text typed in the input box. Text left unchanged for a while during the current refresh counts
-  as abandoned. scripts/send-clear takes it out of the input box into .loop/unsent/, and deletes it if that fails.
+- the maintainer wrote to the orchestrator in the last {active_minutes} minutes, unless the orchestrator's context has
+  grown too large to wait.
+- the maintainer has text typed in the input box. Text left unchanged for {abandoned_seconds} seconds during the current
+  refresh counts as abandoned. scripts/send-clear takes it out of the input box into .loop/unsent/, and deletes it if
+  that fails.
 
 It tells whether a turn is running from the transcript as well as the screen, because Claude Code hides its
 spinner while it writes a long answer.
@@ -201,8 +202,9 @@ def clear(pane: str) -> None:
 
 
 def main() -> int:
+    description = __doc__.format(active_minutes=watching.ACTIVE_MINUTES, abandoned_seconds=ABANDONED_SECONDS)
     argparse.ArgumentParser(
-        prog="scripts/send-clear", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="scripts/send-clear", description=description, formatter_class=argparse.RawDescriptionHelpFormatter
     ).parse_args()
     if usage.running_sender():
         return 0
