@@ -20,7 +20,7 @@ CLAUDE = usage.Account("claude", "claude", None)
 CLAUDE_2 = usage.Account("claude-2", "claude", "~/.claude-2")
 ACCOUNTS = [CLAUDE, CLAUDE_2, usage.Account("codex", "codex", None)]
 WORKTREE = launching.WORKTREES / "builder-1-test"
-RULES = "# How to work here\n"
+AGENTS_MD = "# How to work here\n"
 
 
 def decisions(claude_room: int, claude_2_room: int, codex_room: int = 5) -> dict[str, meter.Decision]:
@@ -77,11 +77,11 @@ class SettingsTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def test_the_sandbox_lets_an_agent_write_only_its_own_uv_cache(self):
-        writable = json.loads(launching.settings(WORKTREE, RULES))["sandbox"]["filesystem"]["allowWrite"]
+        writable = json.loads(launching.settings(WORKTREE, AGENTS_MD))["sandbox"]["filesystem"]["allowWrite"]
         self.assertEqual(writable, [str(launching.UV_CACHE)])
 
     def test_an_agent_cant_run_a_command_outside_the_sandbox(self):
-        self.assertIs(json.loads(launching.settings(WORKTREE, RULES))["sandbox"]["allowUnsandboxedCommands"], False)
+        self.assertIs(json.loads(launching.settings(WORKTREE, AGENTS_MD))["sandbox"]["allowUnsandboxedCommands"], False)
 
     def test_an_agent_cant_read_secrets_or_account_folders_but_can_read_what_gh_and_git_need(self):
         folder = tempfile.TemporaryDirectory()
@@ -92,7 +92,7 @@ class SettingsTest(unittest.TestCase):
         accounts = home / "accounts.json"
         accounts.write_text(json.dumps([{"name": "claude-2", "provider": "claude", "home": str(home / ".claude-2")}]))
         with mock.patch.object(Path, "home", lambda: home), mock.patch.object(launching.usage, "ACCOUNTS", accounts):
-            settings = json.loads(launching.settings(WORKTREE, RULES))
+            settings = json.loads(launching.settings(WORKTREE, AGENTS_MD))
         denied = settings["permissions"]["deny"]
         expected = [
             "Read(~/.netrc)",
@@ -126,7 +126,7 @@ class SettingsTest(unittest.TestCase):
         (main / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"deny": deny}, "sandbox": {}}))
         worktree = Path(folder.name) / "worktree"
         with mock.patch.object(launching, "ROOT", main):
-            denied = json.loads(launching.settings(worktree, RULES))["permissions"]["deny"]
+            denied = json.loads(launching.settings(worktree, AGENTS_MD))["permissions"]["deny"]
         for checkout in (main, worktree):
             with self.subTest(checkout=checkout):
                 in_checkout = [rule for rule in denied if rule.startswith((f"Read(/{checkout}/", f"Edit(/{checkout}/"))]
@@ -149,12 +149,12 @@ class SettingsTest(unittest.TestCase):
         }
         (main / ".claude" / "settings.json").write_text(json.dumps(project))
         with mock.patch.object(launching, "ROOT", main):
-            settings = json.loads(launching.settings(WORKTREE, RULES))
+            settings = json.loads(launching.settings(WORKTREE, AGENTS_MD))
         self.assertEqual(settings["env"], project["env"])
         self.assertEqual(settings["hooks"]["Stop"], project["hooks"]["Stop"])
 
     def test_the_write_guard_checks_the_file_tools_against_the_agents_worktree(self):
-        hooks = json.loads(launching.settings(WORKTREE, RULES))["hooks"]["PreToolUse"]
+        hooks = json.loads(launching.settings(WORKTREE, AGENTS_MD))["hooks"]["PreToolUse"]
         guards = [entry for entry in hooks if entry["matcher"] == "Edit|Write|NotebookEdit"]
         self.assertEqual(len(guards), 1)
         # It starts as an MCP server does, which McpServersTest checks.
@@ -163,12 +163,12 @@ class SettingsTest(unittest.TestCase):
 
     def test_a_write_guard_that_cant_start_refuses_the_call(self):
         with mock.patch.object(launching, "WRITE_GUARD", Path("/nonexistent/write-guard")):
-            hooks = json.loads(launching.settings(WORKTREE, RULES))["hooks"]["PreToolUse"]
+            hooks = json.loads(launching.settings(WORKTREE, AGENTS_MD))["hooks"]["PreToolUse"]
         command = hooks[-1]["hooks"][0]["command"]
         ran = subprocess.run(["/bin/sh", "-c", command], input="{}", capture_output=True, text=True, check=False)
         self.assertEqual(ran.returncode, 2)
 
-    def test_each_subagent_gets_the_agents_md_text_unchanged_and_unrun_by_the_shell(self):
+    def test_each_subagent_gets_the_agents_md_text_exactly_as_written(self):
         rules = "Don't run $(touch made-by-hook), `touch made-by-hook` or ${CLAUDE_PLUGIN_ROOT}; 100% of 'quotes'\nand \\n.\n"
         hooks = json.loads(launching.settings(WORKTREE, rules))["hooks"]["SubagentStart"]
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", hooks[-1]["hooks"][0]["command"])
@@ -186,7 +186,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(os.listdir(folder.name), [])
 
     def test_an_agent_cant_move_its_session_to_another_worktree(self):
-        self.assertIn("EnterWorktree", json.loads(launching.settings(WORKTREE, RULES))["permissions"]["deny"])
+        self.assertIn("EnterWorktree", json.loads(launching.settings(WORKTREE, AGENTS_MD))["permissions"]["deny"])
 
 
 class AgentVariablesTest(unittest.TestCase):
@@ -307,7 +307,7 @@ class StartTest(unittest.TestCase):
         guard = json.loads(command[command.index("--settings") + 1])["hooks"]["PreToolUse"][-1]["hooks"][0]
         self.assertIn(str(self.folder), shlex.split(guard["command"]))
 
-    def test_an_agents_subagents_get_its_rules(self):
+    def test_an_agents_subagents_get_its_agents_md_text_without_its_skills(self):
         _, _, command = self.start(resumes=False)
         hooks = json.loads(command[command.index("--settings") + 1])["hooks"]["SubagentStart"]
         self.assertIn("The rules.", hooks[-1]["hooks"][0]["command"])

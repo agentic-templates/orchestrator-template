@@ -43,7 +43,7 @@ class AgentFieldsTest(unittest.TestCase):
                         field,
                         launching.PASSED_AGENT_FIELDS,
                         f".claude/agents/{agent_file.name} sets {field}, which the launcher doesn't pass to agents, so "
-                        "it does nothing. Remove it.",
+                        "it does nothing. Remove the field.",
                     )
 
 

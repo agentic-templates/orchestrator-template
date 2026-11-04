@@ -92,7 +92,7 @@ class AgentType:
     name: str
     fields: dict[str, str | list[str]]
     prompt: str
-    # AGENTS.md and each folder's AGENTS.md, which subagents get as well. The instructions add the preloaded skills.
+    # AGENTS.md and each folder's AGENTS.md: all that subagents get. The instructions are this text and the skills.
     agents_md: str
     instructions: str
 
@@ -329,8 +329,8 @@ def holding(porcelain: str, branch: str) -> list[Path]:
 def settings(worktree: Path, agents_md: str) -> str:
     """The project's settings, read from the main checkout's files, for an agent that loads no settings from its
     worktree. An agent can rewrite the git objects that its worktree shares with the main checkout, so the settings,
-    whose hooks run outside the sandbox, don't come from git. Only the AGENTS.md text, which a hook prints for each
-    subagent, does.
+    whose hooks run outside the sandbox, don't come from git. The one exception is the AGENTS.md text that a hook
+    prints for each subagent.
 
     The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and the agent
     can't ask to run a command outside it, because the allow rules would approve that without asking. The sandbox
@@ -360,12 +360,12 @@ def settings(worktree: Path, agents_md: str) -> str:
     command = shlex.join(started_in_main([str(WRITE_GUARD), str(worktree)])) + " || exit 2"
     guard = {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": command}]}
     # A subagent loads no AGENTS.md, so this hook gives it the agent's. The text comes from git objects that agents can
-    # rewrite, so the shell sees it only inside single quotes, and printf only after its format. Claude Code refuses
-    # a command that names ${CLAUDE_PLUGIN_ROOT} outside a plugin, so the JSON writes each $ as \u0024. Claude Code
-    # cuts a hook's output at 10,000 characters.
-    hook_reply = {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": agents_md}}
-    reply = json.dumps(hook_reply).replace("$", "\\u0024")
-    subagent_hook = {"hooks": [{"type": "command", "command": shlex.join(["printf", "%s", reply])}]}
+    # rewrite, so the shell sees it only inside single quotes, and printf gets it after a %s format, never as one.
+    # Claude Code refuses a command that contains ${CLAUDE_PLUGIN_ROOT} outside a plugin, so the JSON writes every $
+    # as \u0024. Claude Code cut a SessionStart hook's output at 10,000 characters, and may cut this one too.
+    hook_output = {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": agents_md}}
+    hook_output_json = json.dumps(hook_output).replace("$", "\\u0024")
+    subagent_hook = {"hooks": [{"type": "command", "command": shlex.join(["printf", "%s", hook_output_json])}]}
     hooks = hooks | {
         "PreToolUse": [*hooks.get("PreToolUse", []), guard],
         "SubagentStart": [*hooks.get("SubagentStart", []), subagent_hook],
@@ -580,16 +580,16 @@ def agent_type_from_main(name: str) -> AgentType:
     definition = text_from_main(f".claude/agents/{name}.md")
     fields = usage.definition_fields(definition)
     files = git("ls-tree", "-r", "-z", "--name-only", "origin/main").split("\0")
-    agents_md = [usage.without_front_matter(text_from_main("AGENTS.md"))]
+    agents_md_texts = [usage.without_front_matter(text_from_main("AGENTS.md"))]
     for path in sorted(path for path in files if path.endswith("/AGENTS.md")):
         rules = usage.without_front_matter(text_from_main(path))
-        agents_md.append(f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{rules}")
+        agents_md_texts.append(f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{rules}")
     skill_texts = [
         usage.without_front_matter(text_from_main(f".agents/skills/{skill}/SKILL.md"))
         for skill in usage.preloaded_skills(fields)
     ]
     prompt = usage.without_front_matter(definition)
-    return AgentType(name, fields, prompt, "\n\n".join(agents_md), "\n\n".join(agents_md + skill_texts))
+    return AgentType(name, fields, prompt, "\n\n".join(agents_md_texts), "\n\n".join(agents_md_texts + skill_texts))
 
 
 def text_from_main(path: str) -> str:
@@ -598,8 +598,9 @@ def text_from_main(path: str) -> str:
     return text
 
 
-# The agent-file fields that the launcher passes to an agent, in agent_arguments and the first message. It drops any
-# other field, so a field that agent_arguments starts to pass goes here too. `name` repeats the file's name.
+# The agent-file fields that reach a launched agent: description, model, tools and effort through agent_arguments,
+# skills in its first message, and name, which must match the file's name. The launcher drops any other field, so add
+# a field here when agent_arguments starts to pass it.
 PASSED_AGENT_FIELDS = ("name", "description", "model", "effort", "tools", "skills")
 
 
