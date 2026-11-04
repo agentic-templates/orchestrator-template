@@ -7,6 +7,7 @@ from unittest import mock
 import refreshing
 import usage
 from refreshing import LONG_STATE, findings, last_turn_end, tool_calls_since, turn_running
+from temporary_loop import TemporaryLoopTest
 
 REQUEST_TIME = 1_792_540_000.0  # 2026-10-20T23:46:40Z
 
@@ -26,6 +27,12 @@ class FindingsTest(unittest.TestCase):
         found = findings("In progress: #4, #5 and #6.\n", closed=set())
         self.assertEqual(
             found, ["Line 1 lists several issues or pull requests. Delete the ones that scripts/status lists."]
+        )
+
+    def test_a_line_that_lists_four_issues_is_reported(self):
+        self.assertEqual(
+            findings("In progress: #4, #5, #6 and #7.\n", closed=set()),
+            ["Line 1 lists several issues or pull requests. Delete the ones that scripts/status lists."],
         )
 
     def test_two_issues_on_a_line_are_fine(self):
@@ -68,6 +75,27 @@ class ToolCallsSinceTest(unittest.TestCase):
     def test_a_missing_transcript_has_no_tool_calls(self):
         self.assertFalse(tool_calls_since(self.path, REQUEST_TIME))
 
+    def test_a_tool_call_after_a_prompt_counts(self):
+        self.write(
+            prompt("2026-10-20T23:47:00.000Z", "Go on."),
+            entry("assistant", "2026-10-20T23:47:10.000Z", [{"type": "tool_use", "name": "Read"}]),
+        )
+        self.assertTrue(tool_calls_since(self.path, REQUEST_TIME))
+
+
+class IsCancelledTest(unittest.TestCase):
+    def setUp(self):
+        self.path = Path(tempfile.mkdtemp()) / "transcript.jsonl"
+
+    def test_a_request_without_a_transcript_is_never_cancelled(self):
+        self.assertFalse(refreshing.is_cancelled({"transcript": None, "time": REQUEST_TIME}))
+
+    def test_only_a_tool_call_after_the_request_cancels_it(self):
+        self.path.write_text(entry("assistant", "2026-10-20T23:46:39.000Z", [{"type": "tool_use", "name": "Bash"}]))
+        self.assertFalse(refreshing.is_cancelled({"transcript": str(self.path), "time": REQUEST_TIME}))
+        self.path.write_text(entry("assistant", "2026-10-20T23:47:10.000Z", [{"type": "tool_use", "name": "Bash"}]))
+        self.assertTrue(refreshing.is_cancelled({"transcript": str(self.path), "time": REQUEST_TIME}))
+
 
 def prompt(timestamp: str, content: str | list[dict]) -> str:
     return json.dumps({"type": "user", "timestamp": timestamp, "message": {"role": "user", "content": content}}) + "\n"
@@ -103,6 +131,17 @@ class TurnRunningTest(unittest.TestCase):
         self.path.write_text(turn_end("2026-10-21T07:04:39Z") + prompt("2026-10-21T07:04:40Z", "<command-name>/clear"))
         self.assertFalse(turn_running(self.path))
 
+    def test_a_commands_output_starts_no_turn(self):
+        output = "<local-command-stdout>Context usage: 41k tokens</local-command-stdout>"
+        self.path.write_text(turn_end("2026-10-21T07:04:39Z") + prompt("2026-10-21T07:04:41Z", output))
+        self.assertFalse(turn_running(self.path))
+
+    def test_an_api_error_in_a_turn_doesnt_end_it(self):
+        api_error = json.dumps({"type": "system", "subtype": "api_error", "timestamp": "2026-10-21T07:02:00Z"}) + "\n"
+        self.path.write_text(turn_end("2026-10-21T07:00:00Z") + prompt("2026-10-21T07:01:00Z", "Go.") + api_error)
+        self.assertTrue(turn_running(self.path))
+        self.assertEqual(last_turn_end(self.path), REQUEST_TIME + 26_000)  # 2026-10-21T07:00:00Z
+
     def test_a_missing_transcript_runs_no_turn(self):
         self.assertFalse(turn_running(self.path))
 
@@ -130,22 +169,46 @@ class TurnRunningTest(unittest.TestCase):
         self.assertFalse(turn_running(self.path))
 
 
-class ClearTest(unittest.TestCase):
+class ClearTest(TemporaryLoopTest):
     def test_a_new_session_is_told_about_its_context_again(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        root = Path(folder.name)
-        patches = [mock.patch.object(usage, "NOTICES", root / "notices")]
-        names = ("REQUEST", "CHECKED", "WAITING", "FAILED")
-        patches += [mock.patch.object(refreshing, name, root / name) for name in names]
-        for patch in patches:
-            patch.start()
-            self.addCleanup(patch.stop)
         usage.notify(usage.ORCHESTRATOR_ID, "context", "Refresh soon.")
         self.assertEqual(usage.untold_notices(usage.ORCHESTRATOR_ID), ["Refresh soon."])
         refreshing.clear()
         usage.notify(usage.ORCHESTRATOR_ID, "context", "Refresh soon.")
         self.assertEqual(usage.untold_notices(usage.ORCHESTRATOR_ID), ["Refresh soon."])
+
+    def test_a_new_session_drops_the_request_the_shown_checklist_and_a_failed_refresh(self):
+        for path in (refreshing.REQUEST, refreshing.CHECKED, refreshing.WAITING, refreshing.FAILED):
+            path.write_text("")
+        refreshing.clear()
+        self.assertEqual(list(self.loop.iterdir()), [])
+
+
+class RequestTest(TemporaryLoopTest):
+    def logged_sizes(self) -> list[int]:
+        return [json.loads(line)["state_characters"] for line in refreshing.LOG.read_text().splitlines()]
+
+    def test_counts_long_states_in_a_row_and_logs_each_size(self):
+        refreshing.STATE.write_text("a" * 7_000)
+        counts = []
+        for transcript in ("1.jsonl", "2.jsonl", "3.jsonl"):
+            refreshing.request(transcript)
+            counts.append(refreshing.LONG_STATES.read_text())
+        refreshing.STATE.write_text("a" * 100)
+        refreshing.request("4.jsonl")
+        counts.append(refreshing.LONG_STATES.read_text())
+        self.assertEqual(counts, ["1", "2", "3", "0"])
+        self.assertEqual(self.logged_sizes(), [7_000, 7_000, 7_000, 100])
+
+    def test_a_missing_state_is_not_long(self):
+        refreshing.request(None)
+        self.assertEqual(refreshing.LONG_STATES.read_text(), "0")
+        self.assertEqual(self.logged_sizes(), [0])
+
+    def test_the_request_is_read_back(self):
+        self.assertIsNone(refreshing.load_request())
+        refreshing.request("t.jsonl")
+        self.assertEqual((refreshing.load_request() or {}).get("transcript"), "t.jsonl")
 
 
 class LastTurnEndTest(unittest.TestCase):
