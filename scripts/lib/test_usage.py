@@ -21,9 +21,6 @@ class AgentSkillsTest(unittest.TestCase):
         self.assertIn("building", usage.preloaded_skills(builder_small))
         self.assertNotIn("building", usage.preloaded_skills(reviewer))
 
-    def test_an_unknown_agent_type_preloads_nothing(self):
-        self.assertEqual(usage.agent_skills("no-such-agent"), [])
-
     def test_reads_skills_written_as_lines(self):
         fields = usage.definition_fields("---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n")
         self.assertEqual(usage.preloaded_skills(fields), ["building", "code"])

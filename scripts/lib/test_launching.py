@@ -158,7 +158,14 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(len(guards), 1)
         # It starts as an MCP server does, which McpServersTest checks.
         expected = launching.started_in_main([str(launching.ROOT / "scripts" / "hooks" / "write-guard"), str(WORKTREE)])
-        self.assertEqual(shlex.split(guards[0]["hooks"][0]["command"]), expected)
+        self.assertEqual(shlex.split(guards[0]["hooks"][0]["command"]), [*expected, "||", "exit", "2"])
+
+    def test_a_write_guard_that_cant_start_refuses_the_call(self):
+        with mock.patch.object(launching, "WRITE_GUARD", Path("/nonexistent/write-guard")):
+            hooks = json.loads(launching.settings(WORKTREE))["hooks"]["PreToolUse"]
+        command = hooks[-1]["hooks"][0]["command"]
+        ran = subprocess.run(["/bin/sh", "-c", command], input="{}", capture_output=True, text=True, check=False)
+        self.assertEqual(ran.returncode, 2)
 
     def test_an_agent_cant_move_its_session_to_another_worktree(self):
         self.assertIn("EnterWorktree", json.loads(launching.settings(WORKTREE))["permissions"]["deny"])
@@ -248,6 +255,10 @@ class StartTest(unittest.TestCase):
         }
         # Stands in for Claude Code, which the test mustn't start.
         self.popen = mock.MagicMock()
+        self.agent_input, writer = os.pipe()
+        os.set_blocking(self.agent_input, False)
+        self.addCleanup(os.close, self.agent_input)
+        self.popen.return_value.stdin = os.fdopen(writer, "wb")
         for patch in (
             mock.patch.dict(os.environ, inherited, clear=True),
             mock.patch.object(launching, "AGENTS_ENV", agents_env),
@@ -263,11 +274,18 @@ class StartTest(unittest.TestCase):
         builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "The rules.")
         with mock.patch.object(launching.usage, "transcript", lambda account, session: resumes):
             launching.start(ACCOUNTS[0], builder, "builder-1-test", self.folder, "Build issue #1.", "session")
-        reader = os.open(self.folder / "agents" / "builder-1-test.input", os.O_RDONLY | os.O_NONBLOCK)
-        self.addCleanup(os.close, reader)
-        message = json.loads(read_line(reader))["message"]["content"]
+        message = json.loads(read_line(self.agent_input))["message"]["content"]
         command = self.popen.call_args.args[0]
         return self.popen.call_args.kwargs["env"], message, command
+
+    def test_an_agent_starts_as_its_type(self):
+        _, _, command = self.start(resumes=False)
+        self.assertEqual(command[command.index("--agent") + 1], "builder")
+
+    def test_an_agents_write_guard_checks_its_own_worktree(self):
+        _, _, command = self.start(resumes=False)
+        guard = json.loads(command[command.index("--settings") + 1])["hooks"]["PreToolUse"][-1]["hooks"][0]
+        self.assertIn(str(self.folder), shlex.split(guard["command"]))
 
     def test_an_agent_doesnt_inherit_an_effort_that_would_override_its_types(self):
         environment, _, _ = self.start(resumes=False)
@@ -321,9 +339,16 @@ class StartTest(unittest.TestCase):
             starting.start()
             starting.join(5)
         self.assertFalse(starting.is_alive())
-        reader = os.open(self.folder / "agents" / "builder-1-test.input", os.O_RDONLY | os.O_NONBLOCK)
-        self.addCleanup(os.close, reader)
-        self.assertTrue(json.loads(read_line(reader))["message"]["content"].startswith("x" * 100_000))
+        self.assertTrue(json.loads(read_line(self.agent_input))["message"]["content"].startswith("x" * 100_000))
+
+    def test_a_later_message_longer_than_a_named_pipe_holds_reaches_the_agent_whole(self):
+        self.start(resumes=False)
+        text = "y" * 100_000
+        sending = threading.Thread(
+            target=launching.send, args=(self.folder / "agents" / "builder-1-test.input", text), daemon=True
+        )
+        sending.start()
+        self.assertEqual(json.loads(read_line(self.agent_input))["message"]["content"], text)
 
 
 def read_line(descriptor: int) -> bytes:
@@ -335,22 +360,6 @@ def read_line(descriptor: int) -> bytes:
             break
         line += chunk
     return line
-
-
-class SendTest(unittest.TestCase):
-    def test_a_message_longer_than_a_pipe_holds_arrives_whole(self):
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        path = Path(folder.name) / "input"
-        os.mkfifo(path)
-        reader = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        self.addCleanup(os.close, reader)
-        text = "x" * 100_000
-        writer = threading.Thread(target=launching.send, args=(path, text))
-        writer.start()
-        line = read_line(reader)
-        writer.join()
-        self.assertEqual(json.loads(line)["message"]["content"], text)
 
 
 class AgentTypeFromMainTest(unittest.TestCase):
@@ -373,6 +382,7 @@ class AgentTypeFromMainTest(unittest.TestCase):
             ".claude/agents/builder-y.md": (
                 "---\nname: builder-y\ndescription: Builds.\nmodel: sonnet\nskills: [missing]\n---\n\nBuild.\n"
             ),
+            ".claude/agents/reviewer-x.md": "---\nname: reviewer-x\ndescription: Reviews.\nskills: [code]\n---\n\nReview.\n",
         }
         for path, text in files.items():
             (cls.root / path).parent.mkdir(parents=True, exist_ok=True)
@@ -383,6 +393,9 @@ class AgentTypeFromMainTest(unittest.TestCase):
         run_git(cls.root, *identity, "commit", "--quiet", "--no-verify", "-m", "start")
         run_git(cls.root, "update-ref", "refs/remotes/origin/main", "HEAD")
         (cls.root / "AGENTS.md").write_text("# Changed in the checkout\n")
+        (cls.root / ".claude/agents/builder-x.md").write_text(
+            "---\nname: builder-x\nmodel: haiku\nskills: [code]\n---\n"
+        )
 
     def setUp(self):
         for patch in (
@@ -421,10 +434,14 @@ class AgentTypeFromMainTest(unittest.TestCase):
         self.assertIn("builder-z", launching.agent_type_refusal("builder-z"))
         self.assertEqual(launching.agent_type_refusal("builder-x"), "")
 
+    def test_an_agent_type_builds_if_its_definition_on_main_preloads_the_building_skill(self):
+        self.assertTrue(launching.builds(launching.agent_type_from_main("builder-x")))
+        self.assertFalse(launching.builds(launching.agent_type_from_main("reviewer-x")))
+
     def test_the_record_names_the_agent_types_model_and_effort(self):
-        self.assertEqual(usage.agent_config("builder-x"), "opus/xhigh")
-        self.assertEqual(usage.agent_config("builder-y"), "sonnet/default")
-        self.assertEqual(usage.agent_config("builder-z"), "default/default")
+        self.assertEqual(usage.agent_config(launching.agent_type_from_main("builder-x").fields), "opus/xhigh")
+        self.assertEqual(usage.agent_config({"model": "sonnet"}), "sonnet/default")
+        self.assertEqual(usage.agent_config({}), "default/default")
 
 
 class AgentArgumentsTest(unittest.TestCase):

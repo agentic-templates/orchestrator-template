@@ -514,13 +514,6 @@ def definition_fields(definition: str) -> dict[str, str | list[str]]:
     return fields
 
 
-def agent_fields(agent_type: str) -> dict[str, str | list[str]]:
-    """The fields of an agent type's definition in .claude/agents/ on main, or no fields if main has no such agent
-    type."""
-    definition = main_text(f".claude/agents/{agent_type}.md")
-    return definition_fields(definition) if definition else {}
-
-
 def as_list(field: str | list[str]) -> list[str]:
     """The items of a field that holds a list, written either way that definition_fields reads."""
     items = field.strip("[]").split(",") if isinstance(field, str) else field
@@ -532,17 +525,11 @@ def preloaded_skills(fields: dict[str, str | list[str]]) -> list[str]:
     return as_list(fields.get("skills", ""))
 
 
-def agent_config(agent_type: str) -> str:
-    """The model and effort that an agent type runs with, such as "opus/medium", from its definition."""
-    fields = agent_fields(agent_type)
+def agent_config(fields: dict[str, str | list[str]]) -> str:
+    """The model and effort that an agent type with these fields runs with, such as "opus/medium"."""
     return f"{fields.get('model', 'default')}/{fields.get('effort', 'default')}"
 
 
 def orchestrator_skills(provider: str) -> list[str]:
     """The skills that the session-start hook gives an orchestrator that runs on the provider."""
     return ["orchestrator", f"orchestrator-{provider}"]
-
-
-def agent_skills(agent_type: str) -> list[str]:
-    """The skills that an agent type preloads, from its definition."""
-    return preloaded_skills(agent_fields(agent_type))

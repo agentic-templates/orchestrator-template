@@ -48,8 +48,7 @@ LONG_STATE_NOTE = (
 
 
 def skill(name: str) -> str:
-    text = (ROOT / ".agents" / "skills" / name / "SKILL.md").read_text()
-    return text.split("---", 2)[2].strip() if text.startswith("---") else text
+    return usage.without_front_matter((ROOT / ".agents" / "skills" / name / "SKILL.md").read_text())
 
 
 def take_over(provider: str) -> None:
