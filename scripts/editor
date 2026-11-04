@@ -21,7 +21,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
 import usage
 
-TAKING_INPUT = usage.LOOP / "taking-input"
 UNSENT = usage.LOOP / "unsent"
 
 
@@ -30,14 +29,14 @@ def main() -> int:
         print(__doc__)
         return 0 if len(sys.argv) == 2 else 2
     path = Path(sys.argv[1])
-    if not TAKING_INPUT.exists():
+    if not usage.TAKING_INPUT.exists():
         editor = shlex.split(os.environ.get("LOOP_EDITOR") or "vi")
         os.execvp(editor[0], [*editor, str(path)])
     if text := path.read_text().strip():
         UNSENT.mkdir(parents=True, exist_ok=True)
         (UNSENT / f"{time.strftime('%Y-%m-%d-%H%M%S')}.txt").write_text(text + "\n")
     path.write_text("")
-    TAKING_INPUT.unlink(missing_ok=True)
+    usage.TAKING_INPUT.unlink(missing_ok=True)
     return 0
 
 

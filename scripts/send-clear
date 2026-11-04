@@ -38,11 +38,7 @@ import terminal
 import usage
 import watching
 
-PID = usage.LOOP / "send-clear.pid"
 TYPED = usage.LOOP / "refresh-typed.json"
-# Tells scripts/editor to take the input box's text rather than open the maintainer's editor. The editor deletes it
-# once it has taken the text.
-TAKING_INPUT = usage.LOOP / "taking-input"
 CHECK_SECONDS = 10
 # Text in the box that stays the same this long was left there, rather than being written.
 ABANDONED_SECONDS = 120
@@ -107,13 +103,13 @@ def is_abandoned(text: str, request_time: float) -> bool:
 
 def take_text(pane: str) -> None:
     """Moves the box's text to .loop/unsent/ through the editor that Ctrl+G opens, or deletes it if that fails."""
-    TAKING_INPUT.touch()
+    usage.TAKING_INPUT.touch()
     try:
         press(pane, "C-g")
         wait_for_editor()
     finally:
         # Left behind, it would make the maintainer's own Ctrl+G take their text too.
-        TAKING_INPUT.unlink(missing_ok=True)
+        usage.TAKING_INPUT.unlink(missing_ok=True)
     if screen(pane).box:
         # The maintainer chose losing the text here over stalling the refresh: it's rare, and usually forgotten.
         # Ctrl+C would clear the box too, but on an empty box it starts to quit Claude Code.
@@ -128,7 +124,7 @@ def take_text(pane: str) -> None:
 def wait_for_editor() -> None:
     """Waits until scripts/editor has taken the box's text, which it says by deleting .loop/taking-input."""
     deadline = time.time() + EDITOR_SECONDS
-    while TAKING_INPUT.exists():
+    while usage.TAKING_INPUT.exists():
         if time.time() >= deadline:
             raise CantSend(
                 f"scripts/editor didn't take the text in the input box within {EDITOR_SECONDS} seconds of Ctrl+G. "
@@ -195,9 +191,9 @@ def clear(pane: str) -> None:
 
 def main() -> int:
     argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
-    if (pid := usage.pid_in(PID)) and usage.is_running(pid, "send-clear"):
+    if usage.running_sender():
         return 0
-    PID.write_text(str(os.getpid()))
+    usage.SENDER_PID.write_text(str(os.getpid()))
     try:
         pane = usage.orchestrator().get("pane")
         if not pane:
@@ -210,7 +206,7 @@ def main() -> int:
         refreshing.WAITING.write_text(f"can't send /clear: {error}\n")
         return 1
     finally:
-        PID.unlink(missing_ok=True)
+        usage.SENDER_PID.unlink(missing_ok=True)
     return 0
 
 

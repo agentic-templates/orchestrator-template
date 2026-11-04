@@ -4,6 +4,7 @@ request still holds."""
 import json
 import os
 import re
+import subprocess
 import time
 from collections.abc import Iterator
 from datetime import datetime
@@ -92,6 +93,18 @@ def last_logged_transcript() -> str | None:
     """The transcript of the session whose refresh the log counted last."""
     logged = usage.json_lines(LOG.read_text().splitlines()) if LOG.exists() else []
     return logged[-1].get("transcript") if logged else None
+
+
+def start_sender() -> None:
+    """Starts scripts/send-clear in a session of its own, which outlives the script that starts it. Its output goes
+    nowhere, because a process that keeps the Stop hook's output open can hold up Claude Code until it exits."""
+    subprocess.Popen(
+        [str(usage.ROOT / "scripts" / "send-clear")],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def load_request() -> dict | None:

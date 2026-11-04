@@ -1,7 +1,6 @@
 """The checks that scripts/watch runs every minute, each returning the events that should wake the orchestrator."""
 
 import json
-import subprocess
 import time
 from pathlib import Path
 
@@ -13,11 +12,8 @@ import refreshing
 import thresholds
 import usage
 
-ROOT = usage.ROOT
 STATE = usage.LOOP / "watch.json"
-PID = usage.LOOP / "watch.pid"
 CONTEXTS = usage.LOOP / "contexts.json"
-SENDER_PID = usage.LOOP / "send-clear.pid"
 # The orchestrator holds off a refresh while the maintainer wrote to it within this many minutes.
 ACTIVE_MINUTES = 5
 # A refresh that hasn't happened this long after the request has failed, unless the sender says what it waits for.
@@ -176,14 +172,14 @@ def check_refresh(state: dict) -> list[str]:
     A sender that still runs is waiting for a reason, and a request that a tool call cancelled is the Stop hook's
     to handle."""
     saved = refreshing.load_request()
-    if saved is None or refreshing.is_cancelled(saved) or is_sender_running():
+    if saved is None or refreshing.is_cancelled(saved) or usage.running_sender():
         return []
     if time.time() - saved["time"] < REFRESH_SECONDS:
         return []
     retried = state.get("refresh_retried", {})
     if retried.get("request") != saved["time"]:
         state["refresh_retried"] = {"request": saved["time"], "time": time.time()}
-        subprocess.Popen([str(ROOT / "scripts" / "send-clear")], stdin=subprocess.DEVNULL, start_new_session=True)
+        refreshing.start_sender()
         return []
     if time.time() - retried["time"] < REFRESH_SECONDS or retried.get("reported"):
         return []
@@ -193,12 +189,6 @@ def check_refresh(state: dict) -> list[str]:
     refreshing.FAILED.touch()
     waiting = refreshing.WAITING.read_text().strip() if refreshing.WAITING.exists() else ""
     return [REFRESH_FAILED + (f" The sender's reason, to pass on: {waiting}" if waiting else "")]
-
-
-def is_sender_running() -> bool:
-    """Whether scripts/send-clear still runs."""
-    pid = usage.pid_in(SENDER_PID)
-    return pid is not None and usage.is_running(pid, "send-clear")
 
 
 def check_pull_requests(state: dict) -> list[str]:

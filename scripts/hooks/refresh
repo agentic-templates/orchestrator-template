@@ -10,7 +10,6 @@ exists.
 """
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -36,13 +35,7 @@ def main() -> None:
         refreshing.REQUEST.unlink(missing_ok=True)
         print(json.dumps({"decision": "block", "reason": ASK_AGAIN}))
         return
-    subprocess.Popen(
-        [str(usage.ROOT / "scripts" / "send-clear")],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    refreshing.start_sender()
 
 
 if __name__ == "__main__":
