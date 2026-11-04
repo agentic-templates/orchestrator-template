@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import github
 import refreshing
 import usage
 import watching
@@ -47,6 +48,10 @@ class TemporaryLoopTest(unittest.TestCase):
             os.environ.pop(variable, None)
         # A tmux command that a script under test runs then finds no server, rather than the maintainer's.
         os.environ["TMUX_TMPDIR"] = str(self.root)
+        # github caches gh's answers for the whole run of a script, and each test stands for a run of its own.
+        for function in vars(github).values():
+            if hasattr(function, "cache_clear"):
+                function.cache_clear()
 
     def run_script(self, script: str, *arguments: str, stdin: str = "") -> tuple[int, str]:
         """Runs scripts/<script> in the test's process, with the test's patches, and gives its exit status, from the
