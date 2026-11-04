@@ -76,24 +76,31 @@ def findings(text: str, closed: set[int]) -> list[str]:
 
 def request(transcript: str | None) -> None:
     usage.write_atomically(REQUEST, json.dumps({"time": time.time(), "transcript": transcript}))
-    # A tool call after a request cancels it, and the session then requests the refresh again, so a session's
-    # requests count as one refresh. Without a transcript, the sessions can't be told apart.
-    if transcript is not None and transcript == last_logged_transcript():
-        return
     characters = len(STATE.read_text()) if STATE.exists() else 0
-    is_long = characters > LONG_STATE
-    count = int(LONG_STATES.read_text()) + 1 if is_long and LONG_STATES.exists() else int(is_long)
-    LONG_STATES.write_text(str(count))
-    # Kept for the dashboard: the state's size at each refresh can't be found again later.
-    LOG.parent.mkdir(exist_ok=True)
-    with open(LOG, "a") as file:
-        file.write(json.dumps({"time": time.time(), "transcript": transcript, "state_characters": characters}) + "\n")
-
-
-def last_logged_transcript() -> str | None:
-    """The transcript of the session whose refresh the log counted last."""
     logged = usage.json_lines(LOG.read_text().splitlines()) if LOG.exists() else []
-    return logged[-1].get("transcript") if logged else None
+    # A tool call after a request cancels it, and the orchestrator prunes the state again before it requests the
+    # refresh again. So a session's last request replaces its earlier one in the count and the log. Sessions are told
+    # apart by their transcripts, which a request has once the status line has recorded the session's.
+    is_again = transcript is not None and bool(logged) and logged[-1].get("transcript") == transcript
+    if is_again:
+        long_states_before = logged.pop().get("long_states_before", 0)
+    else:
+        long_states_before = int(LONG_STATES.read_text()) if LONG_STATES.exists() else 0
+    is_long = characters > LONG_STATE
+    LONG_STATES.write_text(str(long_states_before + 1 if is_long else 0))
+    # Kept for the dashboard: the state's size at each refresh can't be found again later.
+    entry = {
+        "time": time.time(),
+        "transcript": transcript,
+        "state_characters": characters,
+        "long_states_before": long_states_before,
+    }
+    LOG.parent.mkdir(exist_ok=True)
+    if is_again:
+        usage.write_atomically(LOG, "".join(json.dumps(line) + "\n" for line in [*logged, entry]))
+        return
+    with open(LOG, "a") as file:
+        file.write(json.dumps(entry) + "\n")
 
 
 def start_sender() -> None:
