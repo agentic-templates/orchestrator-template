@@ -1,5 +1,5 @@
-"""The orchestrator's context refresh: the checks on its saved state, its request to refresh, and whether the
-request still holds."""
+"""The orchestrator's context refresh: the checks on its saved state, its request to refresh, and whether a tool
+call has cancelled the request."""
 
 import json
 import os
@@ -38,11 +38,11 @@ CHECKLIST = """\
 Before the refresh, prune .loop/state.md. Delete each entry that:
 - is done
 - is no longer true
-- an issue or a pull request now holds
+- an issue or a pull request now records
 - scripts/status lists, such as the running agents and the open pull requests
 
 Keep the goal you're working on, the decisions that aren't in an issue yet, what you're waiting for, and each
-temporary instruction from the maintainer that still holds, such as to start no agents until they say so."""
+temporary instruction from the maintainer that still applies, such as to start no agents until they say so."""
 
 
 def references(text: str) -> set[int]:
@@ -68,7 +68,8 @@ def findings(text: str, closed: set[int]) -> list[str]:
     ]
     if len(text) > LONG_STATE:
         found.append(
-            "The state is longer than usual. Look for entries that an issue, a pull request or scripts/status holds."
+            f"The state has {len(text):,} characters, over {LONG_STATE:,}. Look for entries that an issue or a pull "
+            "request records, or that scripts/status lists."
         )
     return found
 
@@ -111,7 +112,7 @@ def load_request() -> dict | None:
     return json.loads(REQUEST.read_text()) if REQUEST.exists() else None
 
 
-def clear() -> None:
+def forget_last_session() -> None:
     """Forgets the request, the checklist and the notices of the session before, as a new session starts. That
     session was told about its own context, and the new one has to be told again."""
     for path in (REQUEST, CHECKED, WAITING, FAILED):
@@ -119,7 +120,7 @@ def clear() -> None:
     usage.forget_notices(usage.ORCHESTRATOR_ID)
 
 
-def tool_calls_since(transcript: Path, since: float) -> bool:
+def called_a_tool_since(transcript: Path, since: float) -> bool:
     """Whether the session's latest tool call came after `since`, by the times its transcript gives each message."""
     for entry in entries_backwards(transcript):
         if entry.get("type") != "assistant" or not entry.get("timestamp"):
@@ -131,9 +132,9 @@ def tool_calls_since(transcript: Path, since: float) -> bool:
 
 
 def turn_running(transcript: Path) -> bool:
-    """Whether the session is in the middle of a turn: its last prompt, which includes a task notification, came
-    after its last turn ended. Claude Code doesn't show its spinner while it writes a long answer, so the screen
-    alone can't tell."""
+    """Whether the session is in the middle of a turn: its last prompt came after its last turn ended. A task
+    notification counts as a prompt. Claude Code doesn't show its spinner while it writes a long answer, so the
+    screen alone can't tell."""
     for entry in entries_backwards(transcript):
         if is_prompt(entry):
             return True
@@ -190,4 +191,4 @@ def entries_backwards(transcript: Path) -> Iterator[dict]:
 
 def is_cancelled(saved: dict) -> bool:
     """A tool call after the request means the session went on working, so its saved state may be out of date."""
-    return bool(saved.get("transcript")) and tool_calls_since(Path(saved["transcript"]), saved["time"])
+    return bool(saved.get("transcript")) and called_a_tool_since(Path(saved["transcript"]), saved["time"])

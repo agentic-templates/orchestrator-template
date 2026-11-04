@@ -35,14 +35,17 @@ NOT_ORCHESTRATED_CONTEXT = (
     "You weren't started with scripts/orchestrate, so refreshes and agent launches may fail. Tell the maintainer "
     "to start you again with scripts/orchestrate, and start no agents until then."
 )
-ANOTHER = (
+# A worktree of the checkout shares its .loop folder, so only a separate clone has records of its own.
+ANOTHER_ORCHESTRATOR_CONTEXT = (
     "Another orchestrator runs in this checkout, as process {pid}, so this session isn't the orchestrator. Tell the "
-    "maintainer to quit this session, and to open sessions for work of their own in another folder."
+    "maintainer to quit this session, and to open sessions for work of their own in a separate clone of the "
+    "repository."
 )
 LONG_STATES_TO_REPORT = 2
 LONG_STATE_NOTE = (
-    "Your saved state was long at the last two refreshes. Send the maintainer a notification saying so, without "
-    "quoting it, so that they can look at .loop/state.md."
+    f"Your saved state was over {refreshing.LONG_STATE:,} characters at each of the last {LONG_STATES_TO_REPORT} "
+    "refreshes. Send the maintainer a notification saying so, without quoting it, so that they can look at "
+    ".loop/state.md."
 )
 
 
@@ -51,7 +54,8 @@ def skill(name: str) -> str:
 
 
 def take_over(provider: str) -> None:
-    """Records the orchestrator's account, and the tmux pane that scripts/send-clear types /clear into."""
+    """Records the orchestrator's account, and the tmux pane that scripts/send-clear types /clear into. Also
+    forgets the refresh request, the failed refresh and the notices of the session before."""
     usage.LOOP.mkdir(exist_ok=True)
     account = usage.account_of(dict(os.environ), provider)
     pid = usage.this_session()
@@ -62,12 +66,12 @@ def take_over(provider: str) -> None:
         "started": pid and usage.started_at(pid),
     }
     usage.write_atomically(usage.ORCHESTRATOR, json.dumps(record))
-    refreshing.clear()
+    refreshing.forget_last_session()
 
 
 def state() -> str:
     if not refreshing.STATE.exists():
-        return "No saved state in .loop/state.md. This is the loop's first session."
+        return "No saved state: .loop/state.md doesn't exist."
     long_note = ""
     if refreshing.LONG_STATES.exists() and int(refreshing.LONG_STATES.read_text()) >= LONG_STATES_TO_REPORT:
         refreshing.LONG_STATES.unlink()
@@ -84,13 +88,24 @@ def status() -> str:
     result = subprocess.run(
         [str(ROOT / "scripts" / "status"), "--save"], capture_output=True, text=True, check=False, cwd=ROOT
     )
-    return f"# The loop's status\n\n{result.stdout or result.stderr}"
+    return status_context(result.returncode, result.stdout, result.stderr)
+
+
+def status_context(code: int, output: str, errors: str) -> str:
+    """What scripts/status printed, under a heading that says when it failed, so that the orchestrator doesn't take
+    an error for the loop's status."""
+    if code == 0:
+        return f"# The loop's status\n\n{output}"
+    return f"# scripts/status --save failed with exit status {code}\n\n{output}{errors}"
 
 
 def respond(context: str, message: str | None = None) -> None:
     """Gives the model the context, and shows the maintainer the message, if any."""
     if len(context) > MAX_CHARACTERS:
-        context = context[: MAX_CHARACTERS - 100] + "\n\n[Cut here. Run scripts/status for the rest.]"
+        context = (
+            context[: MAX_CHARACTERS - 100]
+            + f"\n\n[The rest is cut, at the hook's limit of {MAX_CHARACTERS:,} characters.]"
+        )
     output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     print(json.dumps(output | ({"systemMessage": message} if message else {})))
 
@@ -101,7 +116,7 @@ def main() -> None:
         return
     if other := usage.orchestrator_elsewhere():
         if sys.argv[1] == "skills":
-            respond(ANOTHER.format(pid=other))
+            respond(ANOTHER_ORCHESTRATOR_CONTEXT.format(pid=other))
         return
     if sys.argv[1] == "skills":
         take_over(sys.argv[2])

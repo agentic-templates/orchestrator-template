@@ -4,16 +4,14 @@
 # ///
 """Refreshes the orchestrator's context with /clear once its turn ends, after it has pruned its saved state.
 
-usage: scripts/refresh [--ready]
-
 Without --ready, it shows the checklist for pruning .loop/state.md, and what in the state looks out of place.
-With --ready, it requests the refresh, if the checklist was shown since the last refresh. Otherwise it shows the
-checklist first, as without --ready.
+With --ready, it requests the refresh, if it has shown the checklist since the last refresh. Otherwise it only shows
+the checklist, as without --ready, and the orchestrator runs it with --ready again once the state is pruned.
 
 The refresh happens after the turn ends. A tool call after the request cancels it, because the state may no
-longer match what the session did. Then the Stop hook tells the orchestrator to request it again. scripts/send-clear types
-/clear into the orchestrator's terminal, and the session-start hook gives the new session its skills, its state
-and the loop's status.
+longer match what the session did. Then the Stop hook scripts/hooks/refresh tells the orchestrator to request it
+again. scripts/send-clear types /clear into the orchestrator's terminal, and the session-start hook gives the new
+session its skills, its state and the loop's status.
 """
 
 import argparse
@@ -63,7 +61,9 @@ def show_checklist() -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="scripts/refresh", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--ready", action="store_true", help="request the refresh after the checklist has been shown")
     arguments = parser.parse_args()
     if arguments.ready and refreshing.FAILED.exists():

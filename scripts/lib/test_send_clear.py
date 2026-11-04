@@ -81,19 +81,19 @@ class SendClearTest(TemporaryLoopTest):
 
     def test_waits_while_the_maintainer_wrote_in_the_last_five_minutes(self):
         self.orchestrate(current=100_000, wrote_minutes_ago=4.9)
-        self.assertTrue(self.send_clear["maintainer_is_writing"]())
+        self.assertTrue(self.send_clear["should_wait_for_maintainer"]())
 
     def test_doesnt_wait_once_five_minutes_passed_since_the_maintainer_wrote(self):
         self.orchestrate(current=100_000, wrote_minutes_ago=5)
-        self.assertFalse(self.send_clear["maintainer_is_writing"]())
+        self.assertFalse(self.send_clear["should_wait_for_maintainer"]())
 
     def test_doesnt_wait_for_the_maintainer_once_the_context_is_near_its_limit(self):
         # Past 80% of the 1M window, where everything winds down, so past the point that waits for the maintainer.
         self.orchestrate(current=850_000, wrote_minutes_ago=1)
-        self.assertFalse(self.send_clear["maintainer_is_writing"]())
+        self.assertFalse(self.send_clear["should_wait_for_maintainer"]())
 
     def test_the_window_recorded_for_the_orchestrators_account_and_model_counts(self):
         usage.record_context_windows("claude", {"claude-opus-5-5": {"contextWindow": 200_000}})
         # Past 80% of the 200k window, where the watcher already winds everything down.
         self.orchestrate(current=170_000, wrote_minutes_ago=1)
-        self.assertFalse(self.send_clear["maintainer_is_writing"]())
+        self.assertFalse(self.send_clear["should_wait_for_maintainer"]())

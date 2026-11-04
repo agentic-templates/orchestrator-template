@@ -43,6 +43,14 @@ class AutoMergeTest(HookTest):
         self.assertEqual(self.calls.read_text(), f"pr merge --auto --squash {self.URL}\n")
         self.assertIn(f"Auto-merge is on for {self.URL}.", output)
 
+    def test_tells_the_builder_what_to_do_when_auto_merge_fails(self):
+        self.stand_in_gh('echo "GraphQL: Pull request Auto merge is not allowed for this repository" >&2\nexit 1')
+        output = self.open_pull_request("gh pr create --title 'fix: x' --body-file body.md")
+        self.assertIn(
+            f"Auto-merge isn't on for {self.URL}. Run `gh pr merge --auto --squash {self.URL}` again.", output
+        )
+        self.assertIn("Auto merge is not allowed for this repository", output)
+
     def test_leaves_a_draft_alone(self):
         self.assertEqual(self.open_pull_request("gh pr create --draft --title 'fix: x' --body-file body.md"), "")
         self.assertFalse(self.calls.exists())
@@ -173,6 +181,9 @@ class SessionStartStateTest(HookTest):
         output = json.loads(self.run_script("hooks/session-start", "state", stdin='{"source": "clear"}')[1])
         return output["hookSpecificOutput"]["additionalContext"]
 
+    def test_says_when_there_is_no_saved_state(self):
+        self.assertEqual(self.state(), "No saved state: .loop/state.md doesn't exist.")
+
     def test_a_state_that_fits_is_given_whole(self):
         refreshing.STATE.write_text("# Goal\nShip the importer.\n")
         self.assertEqual(self.state(), "# Your saved state (.loop/state.md)\n\n# Goal\nShip the importer.")
@@ -187,7 +198,7 @@ class SessionStartStateTest(HookTest):
         refreshing.STATE.write_text("a" * 15_000)
         refreshing.LONG_STATES.write_text("2")
         context = self.state()
-        self.assertTrue(context.startswith("Your saved state was long"))
+        self.assertTrue(context.startswith("Your saved state was over 6,000 characters"))
         self.assertLessEqual(len(context), 10_000)
         self.assertTrue(context.endswith(self.CUT))
         self.assertFalse(refreshing.LONG_STATES.exists())
@@ -197,6 +208,20 @@ class SessionStartStateTest(HookTest):
         refreshing.LONG_STATES.write_text("1")
         self.assertTrue(self.state().startswith("# Your saved state"))
         self.assertEqual(refreshing.LONG_STATES.read_text(), "1")
+
+
+class SessionStartStatusTest(HookTest):
+    def test_a_failed_status_is_marked_as_failed(self):
+        status_context = self.load_script("hooks/session-start")["status_context"]
+        context = status_context(1, "## Running agents\nNone\n", "Traceback (most recent call last):\n")
+        self.assertTrue(context.startswith("# scripts/status --save failed with exit status 1\n\n## Running agents"))
+        self.assertIn("Traceback", context)
+
+    def test_the_status_is_given_under_its_heading(self):
+        status_context = self.load_script("hooks/session-start")["status_context"]
+        self.assertEqual(
+            status_context(0, "## Running agents\nNone\n", ""), "# The loop's status\n\n## Running agents\nNone\n"
+        )
 
 
 class StatusLineTest(HookTest):
@@ -216,6 +241,9 @@ class StatusLineTest(HookTest):
             "rate_limits": {"five_hour": {"used_percentage": 42.0, "resets_at": REQUEST_TIME + 3600}},
         }
         return self.run_script("hooks/status-line", stdin=json.dumps(status))[1]
+
+    def test_shows_how_much_of_each_limit_is_used(self):
+        self.assertEqual(self.show(), "five hour 42% used\n")
 
     def test_records_the_orchestrators_transcript_and_window(self):
         self.show()

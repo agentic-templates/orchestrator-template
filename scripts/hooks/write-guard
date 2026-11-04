@@ -22,7 +22,10 @@ def refusal(path: str, worktree: str) -> str:
     if not path:
         return "The tool call names no file. Give the file's absolute path."
     if not os.path.isabs(path):
-        return f"{path} isn't an absolute path. Give the file's full path, starting with your worktree's, {worktree}."
+        return (
+            f"{path} isn't an absolute path. Give the file's absolute path, which starts with your worktree's path, "
+            f"{worktree}."
+        )
     # Resolved, so that a link in the worktree can't lead outside it.
     real = Path(os.path.realpath(path))
     root = Path(os.path.realpath(worktree))

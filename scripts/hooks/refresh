@@ -5,8 +5,8 @@
 """A Stop hook that starts scripts/send-clear once the orchestrator's turn ends after scripts/refresh --ready.
 
 If the orchestrator called a tool after the request, its saved state may not match what it did since, so the
-hook cancels the request and asks it to request the refresh again. The settings run it only while a request
-exists.
+hook cancels the request and asks it to request the refresh again. The settings run it only while
+.loop/refresh-request exists.
 """
 
 import json
@@ -18,8 +18,8 @@ import refreshing
 import usage
 
 ASK_AGAIN = (
-    "The refresh is cancelled, because you used a tool after scripts/refresh --ready. If what you did since changes "
-    ".loop/state.md, update it. Then run scripts/refresh --ready again as the last step of your turn."
+    "The refresh is cancelled, because you used a tool after scripts/refresh --ready. If what you did since makes "
+    ".loop/state.md out of date, update it. Then run scripts/refresh --ready again as the last step of your turn."
 )
 
 

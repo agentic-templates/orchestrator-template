@@ -2,19 +2,18 @@
 # /// script
 # requires-python = ">=3.12"
 # ///
-"""Types /clear into the orchestrator's terminal once its session is idle, then "Continue the loop.".
+"""Once the orchestrator's session is idle, types /clear into its terminal, and then "Continue the loop." into the
+new session.
 
-usage: scripts/send-clear
-
-The Stop hook starts it once the orchestrator has requested a refresh with scripts/refresh --ready, and
-scripts/watch starts it again if the refresh hasn't happened. It types only into the tmux pane that the
+The Stop hook scripts/hooks/refresh starts it once the orchestrator has requested a refresh with scripts/refresh
+--ready, and scripts/watch starts it again if the refresh hasn't happened. It types only into the tmux pane that the
 orchestrator's session started in, and only while no turn runs and no dialog shows. It waits while:
 
-- the maintainer wrote to the orchestrator in the last few minutes, until the orchestrator's context grows past
-  the point where it refreshes even then
-- the maintainer has text typed in the box. Text left unchanged for a while counts as abandoned. The sender
-  moves it to .loop/unsent/ with Ctrl+G and scripts/editor, and the new session never sees it. If Ctrl+G leaves
-  the text in the box, the sender deletes it.
+- the maintainer wrote to the orchestrator in the last {active_minutes} minutes. It stops waiting for this once the
+  orchestrator's context passes the point where the orchestrator refreshes even while the maintainer writes to it.
+- the maintainer has text typed in the input box. Text left unchanged for {abandoned_seconds} seconds counts as
+  abandoned. scripts/send-clear moves it to .loop/unsent/ with Ctrl+G and scripts/editor, and the new session never
+  sees it. If Ctrl+G leaves the text in the input box, scripts/send-clear deletes it.
 
 It tells whether a turn is running from the transcript as well as the screen, because Claude Code hides its
 spinner while it writes a long answer.
@@ -53,6 +52,10 @@ class CantSend(Exception):
     """The sender can't type into the orchestrator's terminal, for the reason it gives."""
 
 
+class CantContinue(Exception):
+    """/clear started a new session, but the sender can't type "Continue the loop." into it."""
+
+
 def tmux(*args: str) -> str:
     result = subprocess.run(["tmux", *args], capture_output=True, text=True, check=False)
     if result.returncode != 0:
@@ -72,14 +75,15 @@ def press(pane: str, *keys: str) -> None:
     tmux("send-keys", "-t", pane, *keys)
 
 
-def wait_for(reason: str) -> None:
+def wait_one_check(reason: str) -> None:
+    """Records in .loop/refresh-waiting why the sender waits, and waits until its next check."""
     refreshing.WAITING.write_text(reason + "\n")
     time.sleep(CHECK_SECONDS)
 
 
-def maintainer_is_writing() -> bool:
-    """Whether the maintainer wrote within the last few minutes, while the context is still below the point where
-    the orchestrator refreshes even then."""
+def should_wait_for_maintainer() -> bool:
+    """Whether the refresh waits for the maintainer, who wrote to the orchestrator within the last
+    watching.ACTIVE_MINUTES, while the orchestrator's context is below the point where it refreshes even then."""
     if not watching.is_maintainer_active():
         return False
     orchestrator = usage.orchestrator()
@@ -138,17 +142,18 @@ def is_busy(shown: terminal.Screen) -> bool:
     return shown.is_busy or bool(transcript and refreshing.turn_running(Path(transcript)))
 
 
-def is_ready(pane: str, request_time: float) -> bool:
-    """Whether the session is idle with an empty box, waiting for the reason when it isn't."""
+def get_ready(pane: str, request_time: float) -> bool:
+    """Whether the session is idle with an empty input box. When it isn't, this waits one check and records why, or
+    takes the maintainer's abandoned text out of the input box."""
     shown = screen(pane)
     if is_busy(shown):
-        wait_for("a turn is running")
+        wait_one_check("a turn is running")
     elif shown.box is None:
-        wait_for("a dialog is open")
-    elif maintainer_is_writing():
-        wait_for("the maintainer wrote to the orchestrator in the last few minutes")
+        wait_one_check("a dialog is open")
+    elif should_wait_for_maintainer():
+        wait_one_check(f"the maintainer wrote to the orchestrator in the last {watching.ACTIVE_MINUTES} minutes")
     elif shown.box and not is_abandoned(shown.box, request_time):
-        wait_for("the maintainer has text in the input box")
+        wait_one_check("the maintainer has text in the input box")
     elif shown.box:
         take_text(pane)
         return False
@@ -171,7 +176,7 @@ def send(pane: str, text: str) -> bool:
 
 def clear(pane: str) -> None:
     while (saved := refreshing.load_request()) and not refreshing.is_cancelled(saved):
-        if is_ready(pane, saved["time"]) and send(pane, "/clear"):
+        if get_ready(pane, saved["time"]) and send(pane, "/clear"):
             break
     else:
         return
@@ -185,12 +190,18 @@ def clear(pane: str) -> None:
         if not refreshing.REQUEST.exists() and shown.box == "" and send(pane, "Continue the loop."):
             return
     if refreshing.REQUEST.exists():
-        raise CantSend("/clear didn't start a new session within a minute")
-    raise CantSend('the new session started, but "Continue the loop." couldn\'t be typed into it')
+        raise CantSend(f"/clear didn't start a new session within {START_SECONDS} seconds")
+    raise CantContinue(
+        '/clear started a new session, but "Continue the loop." couldn\'t be typed into it. Type "Continue the loop." '
+        "into the orchestrator's session and press Enter"
+    )
 
 
 def main() -> int:
-    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+    description = __doc__.format(active_minutes=watching.ACTIVE_MINUTES, abandoned_seconds=ABANDONED_SECONDS)
+    argparse.ArgumentParser(
+        prog="scripts/send-clear", description=description, formatter_class=argparse.RawDescriptionHelpFormatter
+    ).parse_args()
     if usage.running_sender():
         return 0
     usage.SENDER_PID.write_text(str(os.getpid()))
@@ -204,6 +215,9 @@ def main() -> int:
         refreshing.WAITING.unlink(missing_ok=True)
     except CantSend as error:
         refreshing.WAITING.write_text(f"can't send /clear: {error}\n")
+        return 1
+    except CantContinue as error:
+        refreshing.WAITING.write_text(f"{error}\n")
         return 1
     finally:
         usage.SENDER_PID.unlink(missing_ok=True)
