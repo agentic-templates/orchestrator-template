@@ -272,7 +272,7 @@ class WatcherHookTest(HookTest):
         self.assertEqual(output["decision"], "block")
         self.assertIn("scripts/watch isn't running", output["reason"])
 
-    def test_lets_the_turn_end_when_it_has_already_blocked_this_stop(self):
+    def test_lets_the_turn_end_when_a_stop_hook_has_already_blocked_it(self):
         self.assertEqual(self.stop({"hook_event_name": "Stop", "stop_hook_active": True}), "")
 
     def test_a_launched_agent_isnt_asked(self):
