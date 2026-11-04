@@ -41,7 +41,7 @@ class AgentFieldsTest(unittest.TestCase):
                 with self.subTest(agent_file=agent_file.name, field=field):
                     self.assertIn(
                         field,
-                        launching.AGENT_FIELDS,
+                        launching.PASSED_AGENT_FIELDS,
                         f".claude/agents/{agent_file.name} sets {field}, which the launcher doesn't pass to agents, so "
                         "it does nothing. Remove it.",
                     )

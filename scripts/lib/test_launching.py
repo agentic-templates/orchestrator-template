@@ -168,9 +168,10 @@ class SettingsTest(unittest.TestCase):
         ran = subprocess.run(["/bin/sh", "-c", command], input="{}", capture_output=True, text=True, check=False)
         self.assertEqual(ran.returncode, 2)
 
-    def test_each_subagent_gets_the_rules_as_its_context(self):
-        rules = "Don't run $(touch made-by-hook) or `touch made-by-hook`; 100% of 'quotes'\nand \\n stay.\n"
+    def test_each_subagent_gets_the_agents_md_text_unchanged_and_unrun_by_the_shell(self):
+        rules = "Don't run $(touch made-by-hook), `touch made-by-hook` or ${CLAUDE_PLUGIN_ROOT}; 100% of 'quotes'\nand \\n.\n"
         hooks = json.loads(launching.settings(WORKTREE, rules))["hooks"]["SubagentStart"]
+        self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", hooks[-1]["hooks"][0]["command"])
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         ran = subprocess.run(
@@ -288,7 +289,9 @@ class StartTest(unittest.TestCase):
 
     def start(self, resumes: bool) -> tuple[dict[str, str], str, list[str]]:
         """The agent's environment, its first message and its command."""
-        builder = launching.AgentType("builder", {"description": "Builds."}, "You build.", "The rules.", "The rules.")
+        builder = launching.AgentType(
+            "builder", {"description": "Builds."}, "You build.", "The rules.", "The rules.\n\nThe skills."
+        )
         with mock.patch.object(launching.usage, "transcript", lambda account, session: resumes):
             launching.start(ACCOUNTS[0], builder, "builder-1-test", self.folder, "Build issue #1.", "session")
         message = json.loads(read_line(self.agent_input))["message"]["content"]
@@ -308,6 +311,7 @@ class StartTest(unittest.TestCase):
         _, _, command = self.start(resumes=False)
         hooks = json.loads(command[command.index("--settings") + 1])["hooks"]["SubagentStart"]
         self.assertIn("The rules.", hooks[-1]["hooks"][0]["command"])
+        self.assertNotIn("The skills.", hooks[-1]["hooks"][0]["command"])
 
     def test_an_agent_doesnt_inherit_an_effort_that_would_override_its_types(self):
         environment, _, _ = self.start(resumes=False)
@@ -322,7 +326,7 @@ class StartTest(unittest.TestCase):
         self.assertNotIn("OPENAI_API_KEY", environment)
         self.assertEqual(environment["DEEPSEEK_API_KEY"], "from-file")
         self.assertEqual(environment["GH_TOKEN"], "the-loops")
-        self.assertTrue(message.startswith("The rules.\n\nBuild issue #1.\n\n"))
+        self.assertTrue(message.startswith("The rules.\n\nThe skills.\n\nBuild issue #1.\n\n"))
         self.assertIn("leaves out OPENAI_API_KEY.", message)
         self.assertNotIn("DEEPSEEK_API_KEY", message)
         self.assertNotIn("GH_TOKEN", message)
@@ -435,7 +439,7 @@ class AgentTypeFromMainTest(unittest.TestCase):
             "# Building\n\n# Code"
         )
         self.assertEqual(builder.instructions, expected)
-        self.assertEqual(builder.rules, expected.removesuffix("\n\n# Building\n\n# Code"))
+        self.assertEqual(builder.agents_md, expected.removesuffix("\n\n# Building\n\n# Code"))
 
     def test_an_agent_doesnt_start_without_a_skill_its_type_preloads(self):
         with self.assertRaises(SystemExit) as raised:

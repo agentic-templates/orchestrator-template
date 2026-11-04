@@ -92,8 +92,8 @@ class AgentType:
     name: str
     fields: dict[str, str | list[str]]
     prompt: str
-    # AGENTS.md and each folder's AGENTS.md, which the agent's subagents get too.
-    rules: str
+    # AGENTS.md and each folder's AGENTS.md, which subagents get as well. The instructions add the preloaded skills.
+    agents_md: str
     instructions: str
 
 
@@ -326,10 +326,11 @@ def holding(porcelain: str, branch: str) -> list[Path]:
     return [Path(lines[0].removeprefix("worktree ")) for lines in blocks if f"branch refs/heads/{branch}" in lines]
 
 
-def settings(worktree: Path, agent_rules: str) -> str:
+def settings(worktree: Path, agents_md: str) -> str:
     """The project's settings, read from the main checkout's files, for an agent that loads no settings from its
     worktree. An agent can rewrite the git objects that its worktree shares with the main checkout, so the settings,
-    whose hooks run outside the sandbox, don't come from git.
+    whose hooks run outside the sandbox, don't come from git. Only the AGENTS.md text, which a hook prints for each
+    subagent, does.
 
     The sandbox also lets the agent write its own uv cache and reach the hosts in .loop/agents.env, and the agent
     can't ask to run a command outside it, because the allow rules would approve that without asking. The sandbox
@@ -358,10 +359,13 @@ def settings(worktree: Path, agent_rules: str) -> str:
     # missing, would let every write through.
     command = shlex.join(started_in_main([str(WRITE_GUARD), str(worktree)])) + " || exit 2"
     guard = {"matcher": "Edit|Write|NotebookEdit", "hooks": [{"type": "command", "command": command}]}
-    # Subagents load no AGENTS.md either. The rules come from git objects that agents can rewrite, so they are one
-    # quoted argument after printf's format, never a format or a shell word.
-    output = {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": agent_rules}}
-    subagent_hook = {"hooks": [{"type": "command", "command": shlex.join(["printf", "%s", json.dumps(output)])}]}
+    # A subagent loads no AGENTS.md, so this hook gives it the agent's. The text comes from git objects that agents can
+    # rewrite, so the shell sees it only inside single quotes, and printf only after its format. Claude Code refuses
+    # a command that names ${CLAUDE_PLUGIN_ROOT} outside a plugin, so the JSON writes each $ as \u0024. Claude Code
+    # cuts a hook's output at 10,000 characters.
+    hook_reply = {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": agents_md}}
+    reply = json.dumps(hook_reply).replace("$", "\\u0024")
+    subagent_hook = {"hooks": [{"type": "command", "command": shlex.join(["printf", "%s", reply])}]}
     hooks = hooks | {
         "PreToolUse": [*hooks.get("PreToolUse", []), guard],
         "SubagentStart": [*hooks.get("SubagentStart", []), subagent_hook],
@@ -530,7 +534,7 @@ def start(
     # maintainer connected to Claude.
     command = [
         "claude", "-p", "--setting-sources", "user", *agent_arguments(agent_type), "--input-format", "stream-json",
-        "--output-format", "stream-json", "--verbose", "--settings", settings(worktree, agent_type.rules), "--strict-mcp-config",
+        "--output-format", "stream-json", "--verbose", "--settings", settings(worktree, agent_type.agents_md), "--strict-mcp-config",
         *mcp_arguments(), "--name", agent_id,
         *(["--resume", session_id] if resumes else ["--session-id", session_id]),
     ]  # fmt: skip
@@ -576,16 +580,16 @@ def agent_type_from_main(name: str) -> AgentType:
     definition = text_from_main(f".claude/agents/{name}.md")
     fields = usage.definition_fields(definition)
     files = git("ls-tree", "-r", "-z", "--name-only", "origin/main").split("\0")
-    rules = [usage.without_front_matter(text_from_main("AGENTS.md"))]
+    agents_md = [usage.without_front_matter(text_from_main("AGENTS.md"))]
     for path in sorted(path for path in files if path.endswith("/AGENTS.md")):
-        folder_rules = usage.without_front_matter(text_from_main(path))
-        rules.append(f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{folder_rules}")
-    skills = [
+        rules = usage.without_front_matter(text_from_main(path))
+        agents_md.append(f"{path}, the rules for the files in {path.removesuffix('/AGENTS.md')}/:\n\n{rules}")
+    skill_texts = [
         usage.without_front_matter(text_from_main(f".agents/skills/{skill}/SKILL.md"))
         for skill in usage.preloaded_skills(fields)
     ]
     prompt = usage.without_front_matter(definition)
-    return AgentType(name, fields, prompt, "\n\n".join(rules), "\n\n".join(rules + skills))
+    return AgentType(name, fields, prompt, "\n\n".join(agents_md), "\n\n".join(agents_md + skill_texts))
 
 
 def text_from_main(path: str) -> str:
@@ -594,9 +598,9 @@ def text_from_main(path: str) -> str:
     return text
 
 
-# The agent file's fields that reach an agent: its name (from the file's name), skills in the first message, and the
-# rest in agent_arguments. The launcher drops any other field.
-AGENT_FIELDS = ("name", "description", "model", "effort", "tools", "skills")
+# The agent-file fields that the launcher passes to an agent, in agent_arguments and the first message. It drops any
+# other field, so a field that agent_arguments starts to pass goes here too. `name` repeats the file's name.
+PASSED_AGENT_FIELDS = ("name", "description", "model", "effort", "tools", "skills")
 
 
 def agent_arguments(agent_type: AgentType) -> list[str]:
