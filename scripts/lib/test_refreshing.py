@@ -200,6 +200,20 @@ class RequestTest(TemporaryLoopTest):
         self.assertEqual(counts, ["1", "2", "3", "0"])
         self.assertEqual(self.logged_sizes(), [7_000, 7_000, 7_000, 100])
 
+    def test_a_session_that_requests_again_after_a_cancel_counts_once(self):
+        refreshing.STATE.write_text("a" * 7_000)
+        refreshing.request("1.jsonl")
+        refreshing.request("1.jsonl")
+        self.assertEqual(refreshing.LONG_STATES.read_text(), "1")
+        self.assertEqual(self.logged_sizes(), [7_000])
+
+    def test_requests_from_an_unknown_transcript_count_each_time(self):
+        refreshing.STATE.write_text("a" * 7_000)
+        refreshing.request(None)
+        refreshing.request(None)
+        self.assertEqual(refreshing.LONG_STATES.read_text(), "2")
+        self.assertEqual(self.logged_sizes(), [7_000, 7_000])
+
     def test_a_missing_state_is_not_long(self):
         refreshing.request(None)
         self.assertEqual(refreshing.LONG_STATES.read_text(), "0")

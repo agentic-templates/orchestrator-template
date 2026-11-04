@@ -74,6 +74,10 @@ def findings(text: str, closed: set[int]) -> list[str]:
 
 def request(transcript: str | None) -> None:
     usage.write_atomically(REQUEST, json.dumps({"time": time.time(), "transcript": transcript}))
+    # A tool call after a request cancels it, and the session then requests the refresh again, so a session's
+    # requests count as one refresh. Without a transcript, the sessions can't be told apart.
+    if transcript is not None and transcript == last_logged_transcript():
+        return
     characters = len(STATE.read_text()) if STATE.exists() else 0
     is_long = characters > LONG_STATE
     count = int(LONG_STATES.read_text()) + 1 if is_long and LONG_STATES.exists() else int(is_long)
@@ -81,7 +85,13 @@ def request(transcript: str | None) -> None:
     # Kept for the dashboard: the state's size at each refresh can't be found again later.
     LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(LOG, "a") as file:
-        file.write(json.dumps({"time": time.time(), "state_characters": characters}) + "\n")
+        file.write(json.dumps({"time": time.time(), "transcript": transcript, "state_characters": characters}) + "\n")
+
+
+def last_logged_transcript() -> str | None:
+    """The transcript of the session whose refresh the log counted last."""
+    logged = usage.json_lines(LOG.read_text().splitlines()) if LOG.exists() else []
+    return logged[-1].get("transcript") if logged else None
 
 
 def load_request() -> dict | None:
