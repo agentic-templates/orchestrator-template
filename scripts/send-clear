@@ -107,20 +107,23 @@ def is_abandoned(text: str, request_time: float) -> bool:
 
 def take_text(pane: str) -> None:
     """Moves the box's text to .loop/unsent/ through the editor that Ctrl+G opens, or deletes it if that fails."""
+    deadline = time.time() + EDITOR_SECONDS
     usage.TAKING_INPUT.touch()
     try:
         press(pane, "C-g")
-        wait_for_editor()
+        wait_for_editor(deadline)
     finally:
         # Left behind, it would make the maintainer's own Ctrl+G take their text too.
         usage.TAKING_INPUT.unlink(missing_ok=True)
-    if screen(pane).box:
+    shown = wait_for_box(pane, deadline)
+    if shown.box:
         # The maintainer chose losing the text here over stalling the refresh: it's rare, and usually forgotten.
         # Ctrl+C would clear the box too, but on an empty box it starts to quit Claude Code.
         press(pane, "-N", "2000", "BSpace")
         time.sleep(1)
+        shown = screen(pane)
     # No box at all means the editor or a dialog still shows, so the text isn't taken either.
-    if screen(pane).box != "":
+    if shown.box != "":
         raise CantSend(
             "the input box couldn't be emptied. If an editor or a dialog shows in the orchestrator's pane, close it. "
             "If text is left in the input box, empty it by hand"
@@ -128,12 +131,19 @@ def take_text(pane: str) -> None:
     TYPED.unlink(missing_ok=True)
 
 
-def wait_for_editor() -> None:
+def wait_for_editor(deadline: float) -> None:
     """Waits until scripts/editor has taken the box's text, which it says by deleting .loop/taking-input, or until
-    EDITOR_SECONDS have passed, such as when Ctrl+G opened no editor. take_text then looks at the screen."""
-    deadline = time.time() + EDITOR_SECONDS
+    the deadline, such as when Ctrl+G opened no editor."""
     while usage.TAKING_INPUT.exists() and time.time() < deadline:
         time.sleep(0.5)
+
+
+def wait_for_box(pane: str, deadline: float) -> terminal.Screen:
+    """The screen once it shows the input box, which Claude Code draws again only after the editor has exited, or
+    the screen at the deadline."""
+    while (shown := screen(pane)).box is None and time.time() < deadline:
+        time.sleep(0.5)
+    return shown
 
 
 def is_busy(shown: terminal.Screen) -> bool:

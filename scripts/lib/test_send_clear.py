@@ -18,6 +18,10 @@ def box_screen(text: str) -> str:
     return "\n".join(["⏺ An earlier answer.", "", "─" * 40, box, "─" * 40, "  five hour 2% used"]) + "\n"
 
 
+# A screen without the input box, as while an editor or a dialog shows.
+DIALOG = "Do you want to proceed?\n❯ 1. Yes\n  2. No\n"
+
+
 class SendClearTest(TemporaryLoopTest):
     def setUp(self):
         super().setUp()
@@ -68,25 +72,34 @@ class SendClearTest(TemporaryLoopTest):
         self.assertFalse(is_abandoned("ok", NOW + 3 * 3600 - 30))
 
     def test_goes_on_once_the_editor_took_the_text(self):
-        self.send_clear["wait_for_editor"]()
+        self.send_clear["wait_for_editor"](NOW + self.send_clear["EDITOR_SECONDS"])
         self.assertEqual(self.clock.now, NOW)
 
     def test_the_wait_for_the_editor_ends_at_its_deadline(self):
         (self.loop / "taking-input").write_text("")
-        self.send_clear["wait_for_editor"]()
+        self.send_clear["wait_for_editor"](NOW + self.send_clear["EDITOR_SECONDS"])
         self.assertGreaterEqual(self.clock.now, NOW + self.send_clear["EDITOR_SECONDS"])
 
-    def show_in_tmux(self, screen: str, after_backspaces: str | None = None) -> None:
-        """A stand-in for tmux, which shows the screen until a Backspace changes it, and opens no editor."""
-        (self.root / "screen").write_text(screen)
+    def show_in_tmux(self, *screens: str, after_backspaces: str | None = None, editor_takes_text: bool = False) -> None:
+        """A stand-in for tmux. Its first captures show the screens in turn, later ones the last of them, until a
+        Backspace changes the screen to `after_backspaces`. Ctrl+G opens no editor, or one that takes the text at once
+        and deletes .loop/taking-input, as scripts/editor does."""
+        if editor_takes_text:
+            (self.root / "editor-takes-text").write_text("")
+        for number, screen in enumerate(screens, start=1):
+            (self.root / f"screen.{number}").write_text(screen)
         if after_backspaces is not None:
             (self.root / "after-backspaces").write_text(after_backspaces)
         self.stand_in(
             "tmux",
             'echo "$@" >> tmux-calls\n'
             'case "$*" in\n'
-            "  capture-pane*) cat screen ;;\n"
+            "  capture-pane*)\n"
+            "    shown=$(($(cat captures 2>/dev/null || echo 0) + 1)); echo $shown > captures\n"
+            "    [ -f screen.$shown ] && cp screen.$shown screen\n"
+            "    cat screen ;;\n"
             "  *BSpace*) [ -f after-backspaces ] && cp after-backspaces screen ;;\n"
+            "  *C-g*) [ -f editor-takes-text ] && rm -f .loop/taking-input ;;\n"
             "esac\n"
             "exit 0",
         )
@@ -102,9 +115,14 @@ class SendClearTest(TemporaryLoopTest):
         self.assertFalse((self.loop / "taking-input").exists())
         self.assertFalse(typed.exists())
 
+    def test_judges_the_input_box_once_claude_code_has_drawn_it_again(self):
+        self.show_in_tmux(DIALOG, DIALOG, box_screen(""), editor_takes_text=True)
+        self.send_clear["take_text"]("%3")
+        self.assertNotIn("BSpace", (self.root / "tmux-calls").read_text())
+        self.assertLess(self.clock.now, NOW + self.send_clear["EDITOR_SECONDS"])
+
     def test_stops_with_the_reason_when_the_input_box_stays_hidden(self):
-        dialog = "Do you want to proceed?\n❯ 1. Yes\n  2. No\n"
-        self.show_in_tmux(dialog)
+        self.show_in_tmux(DIALOG)
         with self.assertRaisesRegex(self.send_clear["CantSend"], "If an editor or a dialog shows"):
             self.send_clear["take_text"]("%3")
         self.assertFalse((self.loop / "taking-input").exists())
