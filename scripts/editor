@@ -7,8 +7,9 @@
 usage: scripts/editor <file>
 
 While scripts/send-clear takes text that was typed into the orchestrator's input box but never sent, it moves
-the text to .loop/unsent/ and leaves the file empty, so that the box comes back empty. Otherwise it opens the
-file in the editor that LOOP_EDITOR names, which scripts/orchestrate sets to the maintainer's own.
+the text to .loop/unsent/ and leaves the file empty, so that the box comes back empty. It then deletes
+.loop/taking-input, which tells scripts/send-clear that the text is taken. Otherwise it opens the file in the
+editor that LOOP_EDITOR names, which scripts/orchestrate sets to the maintainer's own.
 """
 
 import os
@@ -36,6 +37,7 @@ def main() -> int:
         UNSENT.mkdir(parents=True, exist_ok=True)
         (UNSENT / f"{time.strftime('%Y-%m-%d-%H%M%S')}.txt").write_text(text + "\n")
     path.write_text("")
+    TAKING_INPUT.unlink(missing_ok=True)
     return 0
 
 

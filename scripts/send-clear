@@ -41,9 +41,15 @@ import watching
 
 PID = usage.LOOP / "send-clear.pid"
 TYPED = usage.LOOP / "refresh-typed.json"
+# Tells scripts/editor to take the input box's text rather than open the maintainer's editor. The editor deletes it
+# once it has taken the text.
+TAKING_INPUT = usage.LOOP / "taking-input"
 CHECK_SECONDS = 10
 # Text in the box that stays the same this long was left there, rather than being written.
 ABANDONED_SECONDS = 120
+# How long scripts/editor may take to start and take the text. It starts through uv, which takes longer when its
+# cache is empty.
+EDITOR_SECONDS = 30
 # How long the new session may take to start and become idle after /clear.
 START_SECONDS = 60
 
@@ -102,21 +108,34 @@ def is_abandoned(text: str, request_time: float) -> bool:
 
 def take_text(pane: str) -> None:
     """Moves the box's text to .loop/unsent/ through the editor that Ctrl+G opens, or deletes it if that fails."""
-    taking = usage.LOOP / "taking-input"
-    taking.touch()
+    TAKING_INPUT.touch()
     try:
         press(pane, "C-g")
-        time.sleep(3)
+        wait_for_editor()
     finally:
-        taking.unlink(missing_ok=True)
+        # Left behind, it would make the maintainer's own Ctrl+G take their text too.
+        TAKING_INPUT.unlink(missing_ok=True)
     if screen(pane).box:
         # The maintainer chose losing the text here over stalling the refresh: it's rare, and usually forgotten.
         # Ctrl+C would clear the box too, but on an empty box it starts to quit Claude Code.
         press(pane, "-N", "2000", "BSpace")
         time.sleep(1)
-    if screen(pane).box:
+    # No box at all means the editor or a dialog still shows, so the text isn't taken either.
+    if screen(pane).box != "":
         raise CantSend("text in the input box couldn't be taken out of it. Empty the input box by hand")
     TYPED.unlink(missing_ok=True)
+
+
+def wait_for_editor() -> None:
+    """Waits until scripts/editor has taken the box's text, which it says by deleting .loop/taking-input."""
+    deadline = time.time() + EDITOR_SECONDS
+    while TAKING_INPUT.exists():
+        if time.time() >= deadline:
+            raise CantSend(
+                f"scripts/editor didn't take the text in the input box within {EDITOR_SECONDS} seconds of Ctrl+G. "
+                "If an editor shows in the orchestrator's pane, close it, and empty the input box by hand"
+            )
+        time.sleep(0.5)
 
 
 def is_busy(shown: terminal.Screen) -> bool:

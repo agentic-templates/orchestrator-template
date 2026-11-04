@@ -61,6 +61,16 @@ class SendClearTest(TemporaryLoopTest):
         self.clock.sleep(3 * 3600)
         self.assertFalse(is_abandoned("ok", NOW + 3 * 3600 - 30))
 
+    def test_goes_on_once_the_editor_took_the_text(self):
+        self.send_clear["wait_for_editor"]()
+        self.assertEqual(self.clock.now, NOW)
+
+    def test_stops_with_the_reason_when_the_editor_doesnt_take_the_text_in_time(self):
+        (self.loop / "taking-input").write_text("")
+        with self.assertRaisesRegex(self.send_clear["CantSend"], "scripts/editor didn't take the text"):
+            self.send_clear["wait_for_editor"]()
+        self.assertGreaterEqual(self.clock.now, NOW + self.send_clear["EDITOR_SECONDS"])
+
     def orchestrate(self, current: int, wrote_minutes_ago: float) -> None:
         """An orchestrator on a 1M window that started at 30,000 tokens, with the time the maintainer last wrote."""
         context = contexts.Context(turns=2, start=30_000, current=current, model="claude-opus-5-5")
