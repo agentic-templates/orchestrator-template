@@ -495,8 +495,8 @@ def start(
     usage.AGENTS.mkdir(parents=True, exist_ok=True)
     input_path.unlink(missing_ok=True)
     os.mkfifo(input_path)
-    # Opened for reading and writing, so that the named pipe stays open between the messages that scripts/message
-    # writes.
+    # Opened for reading and writing, so that the relay doesn't read an end of file each time a scripts/message call
+    # closes the named pipe.
     named_pipe = os.fdopen(os.open(input_path, os.O_RDWR), "rb")
     inherited, secret_names = without_secrets(usage.environment_for(account))
     # Claude Code ranks it above --effort, which gives the agent its type's effort.
