@@ -71,7 +71,7 @@ An error message says what failed and what the reader can do about it.
 
 ## Write pull requests
 
-- Write for a developer who joins the project later: what changed, why, and what that reader might otherwise get wrong. The diff shows how the code works, so don't describe it.
+- Write for a developer who joins the project later: what changed, why it was needed, and what that reader might otherwise get wrong. The diff and its code comments show how the code works and why it's written that way, so don't repeat them.
 - Describe the final change, not the history of the branch. After a round of fixes, rewrite the description instead of adding to it.
 - Don't list the changed files, and don't repeat what CI shows. Say how you checked the change only where CI doesn't show it, such as a test by hand.
 - Name each existing test you changed or deleted, and why.
