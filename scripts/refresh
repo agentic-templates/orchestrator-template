@@ -23,31 +23,41 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
-import github
 import refreshing
 import usage
 
 
-def closed(numbers: set[int]) -> set[int]:
-    """The issues and pull requests among `numbers` that are closed. A number that names neither is left out."""
-    repository = github.repository()
+def closed(numbers: set[int]) -> tuple[set[int], dict[int, str]]:
+    """The issues and pull requests among `numbers` that are closed, and gh's error for each number it couldn't
+    read, such as one that names neither, or every number while GitHub can't be reached."""
     found = set()
-    for number in numbers:
-        state = subprocess.run(
-            ["gh", "api", f"repos/{repository}/issues/{number}", "--jq", ".state"],
+    failed = {}
+    for number in sorted(numbers):
+        # gh fills in {owner}/{repo} from the checkout's remote.
+        result = subprocess.run(
+            ["gh", "api", f"repos/{{owner}}/{{repo}}/issues/{number}", "--jq", ".state"],
             capture_output=True, text=True, check=False,
-        ).stdout.strip()  # fmt: skip
-        if state == "closed":
+        )  # fmt: skip
+        if result.returncode != 0:
+            failed[number] = result.stderr.strip()
+        elif result.stdout.strip() == "closed":
             found.add(number)
-    return found
+    return found, failed
 
 
 def show_checklist() -> None:
     text = refreshing.STATE.read_text() if refreshing.STATE.exists() else ""
+    found_closed, failed = closed(refreshing.references(text))
     print(refreshing.CHECKLIST)
-    if found := refreshing.findings(text, closed(refreshing.references(text))):
+    if found := refreshing.findings(text, found_closed):
         print("\nThe script found these in .loop/state.md. Each can still be right, so change only what's out of date:")
         print("\n".join(f"- {finding}" for finding in found))
+    if failed:
+        numbers = ", ".join(f"#{number}" for number in failed)
+        print(
+            f"\nThe script couldn't check whether these issues or pull requests are closed: {numbers}. "
+            f"gh failed: {next(iter(failed.values()))}"
+        )
     print("\nThen run scripts/refresh --ready as the last step of your turn.")
     refreshing.CHECKED.write_text(str(time.time()))
 

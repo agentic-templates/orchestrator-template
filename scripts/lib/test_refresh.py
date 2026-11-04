@@ -39,3 +39,24 @@ class RefreshTest(TemporaryLoopTest):
         self.assertEqual(code, 1)
         self.assertIn("The last refresh failed", output)
         self.assertFalse(refreshing.REQUEST.exists())
+
+
+class RefreshWhileGitHubFailsTest(TemporaryLoopTest):
+    def setUp(self):
+        super().setUp()
+        self.stand_in_gh('echo "error connecting to api.github.com" >&2\nexit 1')
+
+    def test_a_state_that_names_no_issue_can_be_refreshed(self):
+        refreshing.STATE.write_text("# Goal\nShip the importer.\n")
+        self.assertEqual(self.run_script("refresh")[0], 0)
+        self.assertEqual(self.run_script("refresh", "--ready")[0], 0)
+        self.assertTrue(refreshing.REQUEST.exists())
+
+    def test_names_the_issues_it_couldnt_check_and_can_be_refreshed(self):
+        refreshing.STATE.write_text("# Goal\nShip the importer, waiting on #12 and #15.\n")
+        code, output = self.run_script("refresh")
+        self.assertEqual(code, 0)
+        self.assertIn("closed: #12, #15.", output)
+        self.assertIn("error connecting to api.github.com", output)
+        self.assertEqual(self.run_script("refresh", "--ready")[0], 0)
+        self.assertTrue(refreshing.REQUEST.exists())
