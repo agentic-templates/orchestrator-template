@@ -24,7 +24,8 @@ FAILED = usage.LOOP / "refresh-failed"
 LONG_STATES = usage.LOOP / "long-states"
 LOG = usage.LOOP / "metrics" / "refreshes.jsonl"
 # Real working state has never needed more than about 2,500 characters. Past this, the state likely holds what
-# scripts or issues hold, so the refresh shows it for a check, but still happens.
+# scripts or issues hold, so the refresh shows it for a check, but still happens. The texts that the orchestrator reads
+# leave this number out, because an agent given a warning threshold prunes to it instead of by the checklist.
 LONG_STATE = 6_000
 # A line that names this many issues or pull requests is likely a list that a script can give.
 SEVERAL_REFERENCES = 3

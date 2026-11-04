@@ -37,9 +37,9 @@ class TemporaryLoopTest(unittest.TestCase):
         real_loop = usage.LOOP
         patches = [mock.patch.object(usage, "ROOT", self.root)]
         for module in (usage, refreshing, watching):
-            for name, path in vars(module).items():
-                if isinstance(path, Path) and path.is_relative_to(real_loop):
-                    patches.append(mock.patch.object(module, name, self.loop / path.relative_to(real_loop)))
+            for name, value in vars(module).items():
+                if isinstance(value, Path) and value.is_relative_to(real_loop):
+                    patches.append(mock.patch.object(module, name, self.loop / value.relative_to(real_loop)))
         patches.append(mock.patch.dict(os.environ))
         for patch in patches:
             patch.start()
@@ -49,9 +49,9 @@ class TemporaryLoopTest(unittest.TestCase):
         # A tmux command that a script under test runs then finds no server, rather than the maintainer's.
         os.environ["TMUX_TMPDIR"] = str(self.root)
         # github caches gh's answers for the whole run of a script, and each test stands for a run of its own.
-        for function in vars(github).values():
-            if hasattr(function, "cache_clear"):
-                function.cache_clear()
+        for value in vars(github).values():
+            if hasattr(value, "cache_clear"):
+                value.cache_clear()
 
     def run_script(self, script: str, *arguments: str, stdin: str = "") -> tuple[int, str]:
         """Runs scripts/<script> in the test's process, with the test's patches, and gives its exit status, from the
@@ -70,7 +70,8 @@ class TemporaryLoopTest(unittest.TestCase):
         return 0, output.getvalue()
 
     def start_process(self, name: str) -> int:
-        """A process whose command line names it as `name`, as a running script's does."""
+        """Starts a process whose command line names it as `name`, as a running script's does, and gives its
+        process ID."""
         process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", name])
         self.addCleanup(process.wait)
         self.addCleanup(process.kill)

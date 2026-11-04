@@ -35,7 +35,8 @@ NOT_ORCHESTRATED_CONTEXT = (
     "You weren't started with scripts/orchestrate, so refreshes and agent launches may fail. Tell the maintainer "
     "to start you again with scripts/orchestrate, and start no agents until then."
 )
-# A session in a worktree gets this message too, and one in another clone becomes a second orchestrator.
+# A worktree shares the main checkout's .loop, so its sessions get this message too. A clone has a .loop of its own,
+# so its session would become a second orchestrator.
 ANOTHER_ORCHESTRATOR_CONTEXT = (
     "An orchestrator already runs in this checkout, as process {pid}, so this session isn't the orchestrator. Tell "
     "the maintainer to quit this session. For work of their own, they can open sessions in a folder outside every "
