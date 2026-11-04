@@ -71,7 +71,6 @@ def press(pane: str, *keys: str) -> None:
 
 
 def wait_one_check(reason: str) -> None:
-    """Records in .loop/refresh-waiting why the sender waits, and waits until its next check."""
     refreshing.WAITING.write_text(reason + "\n")
     time.sleep(CHECK_SECONDS)
 

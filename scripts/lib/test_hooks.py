@@ -1,8 +1,6 @@
 import io
 import json
 import os
-import subprocess
-import sys
 from contextlib import redirect_stdout
 
 import refreshing
@@ -13,13 +11,6 @@ REQUEST_TIME = 1_792_540_000.0  # 2026-10-20T23:46:40Z
 
 
 class HookTest(TemporaryLoopTest):
-    def start_process(self, name: str) -> int:
-        """A process whose command line names it as `name`, as a running script's does."""
-        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", name])
-        self.addCleanup(process.wait)
-        self.addCleanup(process.kill)
-        return process.pid
-
     def orchestrate_elsewhere(self) -> int:
         """Records an orchestrator that runs in another session of the checkout."""
         pid = self.start_process("claude")
@@ -32,7 +23,8 @@ class AutoMergeTest(HookTest):
 
     def setUp(self):
         super().setUp()
-        self.calls = self.stand_in_gh('echo "$@" >> gh-calls')
+        self.stand_in("gh", 'echo "$@" >> gh-calls')
+        self.calls = self.root / "gh-calls"
 
     def open_pull_request(self, command: str) -> str:
         event = {"tool_input": {"command": command}, "tool_response": {"stdout": self.URL + "\n"}}
@@ -44,7 +36,7 @@ class AutoMergeTest(HookTest):
         self.assertIn(f"Auto-merge is on for {self.URL}.", output)
 
     def test_tells_the_builder_what_to_do_when_auto_merge_fails(self):
-        self.stand_in_gh('echo "GraphQL: Pull request Auto merge is not allowed for this repository" >&2\nexit 1')
+        self.stand_in("gh", 'echo "GraphQL: Pull request Auto merge is not allowed for this repository" >&2\nexit 1')
         output = self.open_pull_request("gh pr create --title 'fix: x' --body-file body.md")
         self.assertIn(
             f"Turning on auto-merge for {self.URL} failed, so the pull request won't merge by itself. Say so in your "

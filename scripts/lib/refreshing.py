@@ -80,9 +80,8 @@ def request(transcript: str | None) -> None:
     # A tool call after a request cancels it, and the orchestrator prunes the state again before it requests the
     # refresh again. So a session's last request replaces its earlier one in the count and the log. Sessions are told
     # apart by their transcripts, which a request has once the status line has recorded the session's.
-    replaces_last_logged = transcript is not None and bool(logged) and logged[-1].get("transcript") == transcript
-    if replaces_last_logged:
-        long_states_before = logged.pop().get("long_states_before", 0)
+    if transcript is not None and logged and logged[-1].get("transcript") == transcript:
+        long_states_before = logged.pop()["long_states_before"]
     else:
         long_states_before = int(LONG_STATES.read_text()) if LONG_STATES.exists() else 0
     is_long = characters > LONG_STATE
@@ -95,11 +94,7 @@ def request(transcript: str | None) -> None:
         "long_states_before": long_states_before,
     }
     LOG.parent.mkdir(exist_ok=True)
-    if replaces_last_logged:
-        usage.write_atomically(LOG, "".join(json.dumps(line) + "\n" for line in [*logged, entry]))
-        return
-    with open(LOG, "a") as file:
-        file.write(json.dumps(entry) + "\n")
+    usage.write_atomically(LOG, "".join(json.dumps(line) + "\n" for line in [*logged, entry]))
 
 
 def start_sender() -> None:

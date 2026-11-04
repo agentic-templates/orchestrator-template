@@ -3,6 +3,8 @@
 import io
 import os
 import runpy
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -34,9 +36,8 @@ class TemporaryLoopTest(unittest.TestCase):
         real_loop = usage.LOOP
         patches = [mock.patch.object(usage, "ROOT", self.root)]
         for module in (usage, refreshing, watching):
-            paths = {name: value for name, value in vars(module).items() if isinstance(value, Path)}
-            for name, path in paths.items():
-                if path.is_relative_to(real_loop):
+            for name, path in vars(module).items():
+                if isinstance(path, Path) and path.is_relative_to(real_loop):
                     patches.append(mock.patch.object(module, name, self.loop / path.relative_to(real_loop)))
         patches.append(mock.patch.dict(os.environ))
         for patch in patches:
@@ -63,15 +64,16 @@ class TemporaryLoopTest(unittest.TestCase):
                 return 1 if isinstance(exit.code, str) else int(exit.code or 0), output.getvalue()
         return 0, output.getvalue()
 
+    def start_process(self, name: str) -> int:
+        """A process whose command line names it as `name`, as a running script's does."""
+        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", name])
+        self.addCleanup(process.wait)
+        self.addCleanup(process.kill)
+        return process.pid
+
     def load_script(self, script: str) -> dict:
         """The functions and constants of scripts/<script>, loaded without running it."""
         return runpy.run_path(str(SCRIPTS / script))
-
-    def stand_in_gh(self, script: str) -> Path:
-        """Puts a stand-in for gh first on PATH, because the real one reads GitHub, and gives the file where it can
-        record its arguments."""
-        self.stand_in("gh", script)
-        return self.root / "gh-calls"
 
     def stand_in(self, program: str, script: str) -> None:
         """Puts a shell script first on PATH as the program. It runs from the temporary folder."""

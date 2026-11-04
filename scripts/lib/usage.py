@@ -349,13 +349,11 @@ def is_running(pid: int, name: str) -> bool:
 
 
 def running_watcher() -> int | None:
-    """The process ID of scripts/watch, if it runs."""
     pid = pid_in(WATCH_PID)
     return pid if pid is not None and is_running(pid, "watch") else None
 
 
 def running_sender() -> int | None:
-    """The process ID of scripts/send-clear, if it runs."""
     pid = pid_in(SENDER_PID)
     return pid if pid is not None and is_running(pid, "send-clear") else None
 

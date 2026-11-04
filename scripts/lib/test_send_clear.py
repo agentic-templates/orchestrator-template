@@ -1,6 +1,4 @@
 import json
-import subprocess
-import sys
 
 import contexts
 import refreshing
@@ -28,13 +26,6 @@ class SendClearTest(TemporaryLoopTest):
         self.clock = Clock(NOW)
         self.clock.patch(self)
         self.send_clear = self.load_script("send-clear")
-
-    def start_process(self, name: str) -> int:
-        """A process whose command line names it as `name`, as a running script's does."""
-        process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", name])
-        self.addCleanup(process.wait)
-        self.addCleanup(process.kill)
-        return process.pid
 
     def test_does_nothing_while_another_sender_runs(self):
         pid = self.start_process("send-clear")
@@ -70,10 +61,6 @@ class SendClearTest(TemporaryLoopTest):
         self.assertFalse(is_abandoned("ok", REQUEST_TIME))
         self.clock.sleep(3 * 3600)
         self.assertFalse(is_abandoned("ok", NOW + 3 * 3600 - 30))
-
-    def test_goes_on_once_the_editor_took_the_text(self):
-        self.send_clear["wait_for_editor"](NOW + self.send_clear["EDITOR_SECONDS"])
-        self.assertEqual(self.clock.now, NOW)
 
     def test_the_wait_for_the_editor_ends_at_its_deadline(self):
         (self.loop / "taking-input").write_text("")

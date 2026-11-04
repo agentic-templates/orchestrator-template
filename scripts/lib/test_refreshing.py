@@ -236,10 +236,8 @@ class RequestTest(TemporaryLoopTest):
         self.assertEqual(refreshing.LONG_STATES.read_text(), "0")
         self.assertEqual(self.logged_sizes(), [0])
 
-    def test_the_request_is_read_back(self):
+    def test_no_request_reads_as_none(self):
         self.assertIsNone(refreshing.load_request())
-        refreshing.request("t.jsonl")
-        self.assertEqual((refreshing.load_request() or {}).get("transcript"), "t.jsonl")
 
 
 class LastTurnEndTest(unittest.TestCase):

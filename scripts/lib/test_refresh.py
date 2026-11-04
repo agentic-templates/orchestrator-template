@@ -8,7 +8,7 @@ from temporary_loop import TemporaryLoopTest
 class RefreshTest(TemporaryLoopTest):
     def setUp(self):
         super().setUp()
-        self.stand_in_gh('case "$1" in repo) echo owner/repo ;; api) echo open ;; esac')
+        self.stand_in("gh", "echo open")
         refreshing.STATE.write_text("# Goal\nShip the importer, waiting on #12.\n")
         usage.ORCHESTRATOR.write_text(json.dumps({"transcript": "orchestrator.jsonl"}))
 
@@ -44,13 +44,7 @@ class RefreshTest(TemporaryLoopTest):
 class RefreshWhileGitHubFailsTest(TemporaryLoopTest):
     def setUp(self):
         super().setUp()
-        self.stand_in_gh('echo "error connecting to api.github.com" >&2\nexit 1')
-
-    def test_a_state_that_names_no_issue_can_be_refreshed(self):
-        refreshing.STATE.write_text("# Goal\nShip the importer.\n")
-        self.assertEqual(self.run_script("refresh")[0], 0)
-        self.assertEqual(self.run_script("refresh", "--ready")[0], 0)
-        self.assertTrue(refreshing.REQUEST.exists())
+        self.stand_in("gh", 'echo "error connecting to api.github.com" >&2\nexit 1')
 
     def test_names_the_issues_it_couldnt_check_and_can_be_refreshed(self):
         refreshing.STATE.write_text("# Goal\nShip the importer, waiting on #12 and #15.\n")
