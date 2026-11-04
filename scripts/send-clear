@@ -52,10 +52,6 @@ class CantSend(Exception):
     """The sender can't type into the orchestrator's terminal, for the reason it gives."""
 
 
-class CantContinue(Exception):
-    """/clear started a new session, but the sender can't type "Continue the loop." into it."""
-
-
 def tmux(*args: str) -> str:
     result = subprocess.run(["tmux", *args], capture_output=True, text=True, check=False)
     if result.returncode != 0:
@@ -200,10 +196,7 @@ def clear(pane: str) -> None:
             return
     if refreshing.REQUEST.exists():
         raise CantSend(f"/clear didn't start a new session within {START_SECONDS} seconds")
-    raise CantContinue(
-        '/clear started a new session, but "Continue the loop." couldn\'t be typed into it. Type "Continue the loop." '
-        "into the orchestrator's session and press Enter"
-    )
+    # The new session started, so the refresh happened, though "Continue the loop." couldn't be typed into it.
 
 
 def main() -> int:
@@ -223,10 +216,7 @@ def main() -> int:
         clear(pane)
         refreshing.WAITING.unlink(missing_ok=True)
     except CantSend as error:
-        refreshing.WAITING.write_text(f"can't send /clear: {error}\n")
-        return 1
-    except CantContinue as error:
-        refreshing.WAITING.write_text(f"{error}\n")
+        refreshing.WAITING.write_text(f"can't refresh: {error}\n")
         return 1
     finally:
         usage.SENDER_PID.unlink(missing_ok=True)
