@@ -25,7 +25,6 @@ sys.path.insert(0, str(ROOT / "scripts" / "lib"))
 import refreshing
 import usage
 
-STATE = ROOT / ".loop" / "state.md"
 MAX_CHARACTERS = 10_000
 # scripts/orchestrate sets LOOP_ORCHESTRATE. Without it, the session runs outside tmux or inside the sandbox.
 NOT_ORCHESTRATED = (
@@ -67,18 +66,18 @@ def take_over(provider: str) -> None:
 
 
 def state() -> str:
-    if not STATE.exists():
+    if not refreshing.STATE.exists():
         return "No saved state in .loop/state.md. This is the loop's first session."
     long_note = ""
     if refreshing.LONG_STATES.exists() and int(refreshing.LONG_STATES.read_text()) >= LONG_STATES_TO_REPORT:
         refreshing.LONG_STATES.unlink()
         long_note = LONG_STATE_NOTE + "\n\n"
-    saved = STATE.read_text().strip()
-    heading = "# Your saved state (.loop/state.md)\n\n"
-    if len(heading) + len(saved) > MAX_CHARACTERS:
+    saved = refreshing.STATE.read_text().strip()
+    before = long_note + "# Your saved state (.loop/state.md)\n\n"
+    if len(before) + len(saved) > MAX_CHARACTERS:
         cut = "\n\n[This is the first part of .loop/state.md. Read the rest of the file.]"
-        saved = saved[: MAX_CHARACTERS - len(heading) - len(cut)] + cut
-    return long_note + heading + saved
+        saved = saved[: MAX_CHARACTERS - len(before) - len(cut)] + cut
+    return before + saved
 
 
 def status() -> str:

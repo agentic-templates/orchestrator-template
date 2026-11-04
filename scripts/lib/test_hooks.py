@@ -166,6 +166,39 @@ class SessionStartTest(HookTest):
         self.assertEqual(self.start({"source": "startup"}, "state"), "")
 
 
+class SessionStartStateTest(HookTest):
+    CUT = "\n\n[This is the first part of .loop/state.md. Read the rest of the file.]"
+
+    def state(self) -> str:
+        output = json.loads(self.run_script("hooks/session-start", "state", stdin='{"source": "clear"}')[1])
+        return output["hookSpecificOutput"]["additionalContext"]
+
+    def test_a_state_that_fits_is_given_whole(self):
+        refreshing.STATE.write_text("# Goal\nShip the importer.\n")
+        self.assertEqual(self.state(), "# Your saved state (.loop/state.md)\n\n# Goal\nShip the importer.")
+
+    def test_a_state_over_the_limit_is_cut_with_where_to_read_the_rest(self):
+        refreshing.STATE.write_text("a" * 15_000)
+        context = self.state()
+        self.assertEqual(len(context), 10_000)
+        self.assertTrue(context.endswith(self.CUT))
+
+    def test_the_second_long_state_in_a_row_adds_the_note_and_keeps_where_to_read_the_rest(self):
+        refreshing.STATE.write_text("a" * 15_000)
+        refreshing.LONG_STATES.write_text("2")
+        context = self.state()
+        self.assertTrue(context.startswith("Your saved state was long"))
+        self.assertLessEqual(len(context), 10_000)
+        self.assertTrue(context.endswith(self.CUT))
+        self.assertFalse(refreshing.LONG_STATES.exists())
+
+    def test_the_first_long_state_adds_no_note(self):
+        refreshing.STATE.write_text("a" * 7_000)
+        refreshing.LONG_STATES.write_text("1")
+        self.assertTrue(self.state().startswith("# Your saved state"))
+        self.assertEqual(refreshing.LONG_STATES.read_text(), "1")
+
+
 class StatusLineTest(HookTest):
     def setUp(self):
         super().setUp()
