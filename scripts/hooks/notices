@@ -6,7 +6,9 @@
 .loop/notices/, such as to wind down, to hand off to a successor, or to refresh its context.
 
 The settings run it only while that folder exists. A builder that scripts/launch started finds its ID in
-LOOP_AGENT_ID, a subagent in the hook's input, and the orchestrator has none, so it uses "orchestrator".
+LOOP_AGENT_ID, and the orchestrator has none, so it uses "orchestrator". Claude Code runs the hook for a subagent's
+tool calls too, with the subagent's ID in the hook's input. A subagent has no notices of its own, and it would take
+its agent's, so the hook shows it nothing.
 """
 
 import json
@@ -19,11 +21,12 @@ import usage
 
 
 def main() -> None:
-    event = json.load(sys.stdin)
-    agent_id = os.environ.get("LOOP_AGENT_ID") or event.get("agent_id") or usage.ORCHESTRATOR_ID
+    if json.load(sys.stdin).get("agent_id"):
+        return
+    agent_id = os.environ.get("LOOP_AGENT_ID") or usage.ORCHESTRATOR_ID
     if agent_id == usage.ORCHESTRATOR_ID and usage.orchestrator_elsewhere():
         return
-    if messages := usage.untold_notices(str(agent_id)):
+    if messages := usage.untold_notices(agent_id):
         context = "\n\n".join(messages)
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolBatch", "additionalContext": context}}))
 

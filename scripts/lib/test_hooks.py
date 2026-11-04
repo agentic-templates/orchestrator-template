@@ -86,6 +86,17 @@ class NoticesTest(HookTest):
         self.assertIn("Wind down now.", output)
         self.assertNotIn("Refresh soon.", output)
 
+    def test_a_launched_agents_subagent_leaves_the_agents_notice_for_it(self):
+        usage.notify("builder-7", "wind-down", "Wind down now.")
+        os.environ["LOOP_AGENT_ID"] = "builder-7"
+        self.assertEqual(self.notices({"agent_id": "a1b2c3", "agent_type": "Explore"}), "")
+        self.assertEqual(usage.untold_notices("builder-7"), ["Wind down now."])
+
+    def test_the_orchestrators_subagent_leaves_the_orchestrators_notice_for_it(self):
+        usage.notify(usage.ORCHESTRATOR_ID, "context", "Refresh soon.")
+        self.assertEqual(self.notices({"agent_id": "a1b2c3", "agent_type": "general-purpose"}), "")
+        self.assertEqual(usage.untold_notices(usage.ORCHESTRATOR_ID), ["Refresh soon."])
+
     def test_a_second_session_in_the_checkout_doesnt_take_the_orchestrators_notices(self):
         self.orchestrate_elsewhere()
         usage.notify(usage.ORCHESTRATOR_ID, "context", "Refresh soon.")
