@@ -75,10 +75,10 @@ class ToolCallsSinceTest(unittest.TestCase):
     def test_a_missing_transcript_has_no_tool_calls(self):
         self.assertFalse(tool_calls_since(self.path, REQUEST_TIME))
 
-    def test_a_tool_call_after_a_prompt_counts(self):
+    def test_a_tool_call_followed_by_its_result_counts(self):
         self.write(
-            prompt("2026-10-20T23:47:00.000Z", "Go on."),
             entry("assistant", "2026-10-20T23:47:10.000Z", [{"type": "tool_use", "name": "Read"}]),
+            entry("user", "2026-10-20T23:47:11.000Z", [{"type": "tool_result"}]),
         )
         self.assertTrue(tool_calls_since(self.path, REQUEST_TIME))
 

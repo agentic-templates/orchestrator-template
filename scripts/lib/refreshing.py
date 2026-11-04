@@ -83,7 +83,7 @@ def request(transcript: str | None) -> None:
     count = int(LONG_STATES.read_text()) + 1 if is_long and LONG_STATES.exists() else int(is_long)
     LONG_STATES.write_text(str(count))
     # Kept for the dashboard: the state's size at each refresh can't be found again later.
-    LOG.parent.mkdir(parents=True, exist_ok=True)
+    LOG.parent.mkdir(exist_ok=True)
     with open(LOG, "a") as file:
         file.write(json.dumps({"time": time.time(), "transcript": transcript, "state_characters": characters}) + "\n")
 
@@ -107,16 +107,13 @@ def clear() -> None:
 
 
 def tool_calls_since(transcript: Path, since: float) -> bool:
-    """Whether the session called a tool after `since`, by the times its transcript gives each message."""
-    if not transcript.exists():
-        return False
-    for entry in usage.json_lines(transcript.read_bytes().splitlines()):
+    """Whether the session's latest tool call came after `since`, by the times its transcript gives each message."""
+    for entry in entries_backwards(transcript):
         if entry.get("type") != "assistant" or not entry.get("timestamp"):
             continue
         content = (entry.get("message") or {}).get("content") or []
-        calls_a_tool = any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content)
-        if calls_a_tool and datetime.fromisoformat(entry["timestamp"]).timestamp() > since:
-            return True
+        if any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content):
+            return datetime.fromisoformat(entry["timestamp"]).timestamp() > since
     return False
 
 
