@@ -23,7 +23,7 @@ import pull_request
 
 def is_research(issue: int) -> bool:
     output = subprocess.run(
-        ["gh", "issue", "view", str(issue), "--json", "labels"], check=True, capture_output=True, text=True
+        ["gh", "issue", "view", str(issue), "--json", "labels"], check=True, stdout=subprocess.PIPE, text=True
     ).stdout
     return any(label["name"] == "research" for label in json.loads(output)["labels"])
 
