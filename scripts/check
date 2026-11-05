@@ -118,7 +118,10 @@ LOOP_TY = ["uvx", "ty@0.0.91", "check", "--project", "scripts", "--extra-search-
 
 
 def git(*args: str) -> list[str]:
-    output = subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    # Without core.quotePath=false, git quotes a path that has a letter outside ASCII, and no file has that name.
+    output = subprocess.run(
+        ["git", "-c", "core.quotePath=false", *args], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout
     return [line for line in output.splitlines() if line]
 
 

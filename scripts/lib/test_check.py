@@ -107,6 +107,12 @@ class ChangedFilesTest(CheckTest):
         self.assertEqual(self.files_given_to("typos@"), ["committed.txt"])
 
 
+class FileNamesTest(CheckTest):
+    def test_checks_a_file_whose_name_has_a_letter_outside_ascii(self):
+        self.write("docs/café.md", "It simply works.\n")
+        self.assertIn('docs/café.md:1: Cut "simply".', self.check()[1])
+
+
 class DeletedFilesTest(CheckTest):
     def test_a_branch_that_deletes_files_passes(self):
         self.write("deleted-in-a-commit.txt")
