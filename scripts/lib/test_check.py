@@ -118,7 +118,8 @@ class ExitStatusTest(unittest.TestCase):
 
 
 class CheckTest(unittest.TestCase):
-    """One repository that holds every test's case, checked three times: plainly, with --base and with --all. main's
+    """One repository that holds every test's case, checked three times: plainly, with --base and with --all. A run per
+    test cost 2 CPU seconds, so add a new case to this repository rather than a run of its own. main's
     first commit holds a loop script without .py that runs python3. The branch left from that commit, and main has a
     later commit that the branch doesn't have. The branch's one commit adds a file and deletes another. Besides a
     staged, a changed and an untracked file and a file deleted only from the folder, the untracked files are a Markdown
