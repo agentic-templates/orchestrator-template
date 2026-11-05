@@ -63,7 +63,8 @@ def check_suppressions(path: str, text: str) -> list[Problem]:
     lines = text.splitlines()
     return [
         Problem(
-            number, 'Give the reason for skipping the check, with the word "because", on this line or the one above.'
+            number,
+            'Give the reason for the suppression or the skipped test, with the word "because", on this line or the one above.',
         )
         for number, line in enumerate(lines, start=1)
         if SUPPRESSION.search(line)
