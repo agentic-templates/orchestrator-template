@@ -16,7 +16,7 @@ PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|or
 # Spelled in parts, because this rule applies to this file too.
 UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
 # Comments and attributes that make a linter or a type checker skip code, and the calls and attributes that skip a
-# test, in the common languages. Each must give its reason, with the word "because", on its own line or the line above.
+# test, in the common languages. Each must give its reason, with the word "because", on the same line or the line above.
 SUPPRESSION = re.compile(
     r"(?i:#\s*((ruff|flake8):\s*)?noqa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
     r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
@@ -25,7 +25,7 @@ SUPPRESSION = re.compile(
     r"|^\s*@((unittest\.)?skip(If|Unless)?|Disabled\w*|Ignore)\b|\.skipTest\(|\bSkipTest\("
     r"|\bpytest\.(mark\.skip(if)?\b|importorskip\(|skip\()"
     # A JavaScript test marker counts only before .each, a test name in quotes or the end of the line, because a
-    # Rust iterator named it has a skip that takes a number. Playwright's test.skip and test.fixme count before any
+    # Rust iterator named `it` has a skip that takes a number. Playwright's test.skip and test.fixme count before any
     # argument, because inside a test they take a condition.
     r"|(?<![\w.$])((x(it|test|describe)|(it|test|describe)\.skip)(\.each\b|\(\s*([\"'`]|$))"
     r"|(it|test|describe)\.skipIf\(|test\.(skip|fixme)\(|this\.skip\(\))"
@@ -61,16 +61,19 @@ def check_suppressions(path: str, text: str) -> list[Problem]:
     if path.endswith(".md") or path == "scripts/lib/files.py":
         return []
     lines = text.splitlines()
-    return [
-        Problem(
-            number,
-            'Give the reason for the suppression or the skipped test, with the word "because", on this line or the one above.',
-        )
-        for number, line in enumerate(lines, start=1)
-        if SUPPRESSION.search(line)
-        and not REASON.search(line)
-        and not (number > 1 and REASON.search(lines[number - 2]))
-    ]
+    problems = []
+    for number, line in enumerate(lines, start=1):
+        match = SUPPRESSION.search(line)
+        if match and not REASON.search(line) and not (number > 1 and REASON.search(lines[number - 2])):
+            form = match.group().strip()
+            problems.append(
+                Problem(
+                    number,
+                    f'"{form}" skips a check or a test. Give the reason, with the word "because", on this line or '
+                    "the one above.",
+                )
+            )
+    return problems
 
 
 def check_size(path: str, text: str) -> list[Problem]:
