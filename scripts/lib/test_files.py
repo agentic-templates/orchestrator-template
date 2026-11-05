@@ -61,9 +61,15 @@ class CheckTextTest(unittest.TestCase):
             ("a.py", "# flake8: no" + "qa: F401"),
             ("a.py", "# ruff: dis" + "able[F401]"),
             ("a.yml", "- uses: actions/checkout@v4 # zizmor:" + " ignore[unpinned-uses]"),
+            ("a.yml", "          # shell" + "check disable=SC2086"),
         ):
             with self.subTest(suppression=suppression):
                 self.assertEqual(len(messages(path, suppression + "\n")), 1)
+
+    def test_accepts_code_that_only_looks_like_a_suppression(self):
+        for path, line in (("a.sh", "# shellcheck source=lib/common.sh"),):
+            with self.subTest(line=line):
+                self.assertEqual(messages(path, line + "\n"), [])
 
     def test_only_docs_and_files_py_may_name_suppressions(self):
         files_py = Path(files.__file__).read_text()

@@ -21,7 +21,7 @@ SUPPRESSION = re.compile(
     r"(?i:#\s*((ruff|flake8):\s*)?noqa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
     r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
     r"|@ts-(ignore|expect-error|nocheck)|biome-ignore|//\s*nolint|#!?\[allow\(|@SuppressWarnings"
-    r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
+    r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore|#\s*shellcheck\s.*\bdisable="
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
 # Claude Code cuts the context that a hook injects at 10,000 characters.
