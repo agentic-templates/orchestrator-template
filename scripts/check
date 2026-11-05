@@ -3,17 +3,18 @@
 # requires-python = ">=3.12"
 # ///
 """Runs the formatters and linters on the files that the branch changes, or on every file with --all, and the tests and
-type checkers on the whole project.
+type checkers on the whole project. The exit status is 1 when any of them fails, or when a file it checks breaks one
+of the repository's own rules, such as a private path, which it prints as "<file>:<line>: <what to do>".
 
-usage: scripts/check [--all] [--base <commit>] [--review]
+Without --base, it checks the files that the branch's commits changed since the last commit the branch shares with
+origin/main, and the files with uncommitted changes, untracked files included. With --base, it checks only the files
+that the commits after the given commit changed.
 
-Without --base, the branch's changes are counted from where it left origin/main, together with
-uncommitted and untracked files. With --review, it lists what a reviewer should judge, such as functions
-that are hard to follow, and doesn't fail. Each check prints "<file>:<line>: <what to do>". The exit status is 1
-when any check fails.
+With --review, it runs none of the checks above, and its exit status is 0. It lists what a reviewer should judge
+instead, such as functions that are hard to follow.
 
-To add a language, add its formatter and linter to TOOLS and its type checker and tests to TESTS, as the `languages`
-skill describes.
+To add a language, give its files a kind in kind(), add its formatter and linter to TOOLS and its type checker and
+tests to TESTS, as the `languages` skill describes.
 """
 
 import argparse
@@ -38,6 +39,10 @@ class Tool(NamedTuple):
 
 RUFF = ["uvx", "ruff@0.17.0"]
 ZIZMOR = ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]
+# A function whose cognitive complexity is over MAX_COMPLEXITY fails the check, and --review lists each function over
+# MAX_COMPLEXITY_UNREVIEWED for a reviewer to judge.
+MAX_COMPLEXITY = 25
+MAX_COMPLEXITY_UNREVIEWED = 15
 
 
 # complexipy reads its settings from the pyproject.toml or complexipy.toml at the repository's root, so the command
@@ -69,10 +74,11 @@ TOOLS = [
     Tool("loop-python", [*RUFF, "format", "--check", "--quiet", "--config", "scripts/ruff.toml"]),
     Tool(
         "loop-python",
-        complexipy(25),
-        "These functions are over the cognitive-complexity limit. Change a function only where the change makes it"
-        " easier to read. If every change you can find would make the function harder to read, leave the function as"
-        " it is, and end its `def` line with `# complexipy: ignore because <why the function reads best as it is>`.",
+        complexipy(MAX_COMPLEXITY),
+        f"These functions have a cognitive complexity over {MAX_COMPLEXITY}. Change a function only where the change"
+        " makes it easier to read. If every change you can find would make the function harder to read, leave the"
+        " function as it is, and end its `def` line with `# complexipy: ignore because <why the function reads best as"
+        " it is>`.",
     ),
     Tool("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
     Tool("workflow", ZIZMOR),
@@ -81,9 +87,8 @@ TOOLS = [
     Tool("any", ["uvx", "typos@1.51.1"]),
 ]
 # With --review, these run instead, and list what a reviewer should judge without failing the check.
-# A function's cognitive complexity fails the check at 25, and a reviewer sees it from 15.
-REVIEW_TOOLS = [Tool("loop-python", complexipy(15))]
-# Each command runs once at every check, on the whole project. PYTHONSAFEPATH stops Python from putting the current
+REVIEW_TOOLS = [Tool("loop-python", complexipy(MAX_COMPLEXITY_UNREVIEWED))]
+# Without --review, each command runs once, on the whole project. PYTHONSAFEPATH stops Python from putting the current
 # folder first on its import path. Without it, a project's own module, such as a signal.py at the repository's root,
 # replaces the standard library's module of the same name in the loop's tests and the processes they start.
 TESTS = [
@@ -185,10 +190,18 @@ def run_on_the_project(commands: list[list[str]]) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(
+        prog="scripts/check", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--all", action="store_true", help="check every file")
-    parser.add_argument("--base", help="count the changes from this commit")
-    parser.add_argument("--review", action="store_true", help="list what a reviewer should judge, without failing")
+    parser.add_argument(
+        "--base",
+        metavar="COMMIT",
+        help="check only the files that the commits after this one changed, not uncommitted ones",
+    )
+    parser.add_argument(
+        "--review", action="store_true", help="instead of the checks, list what a reviewer should judge, and exit 0"
+    )
     arguments = parser.parse_args()
     paths = regular_files(git("ls-files") if arguments.all else changed_files(arguments.base))
     if arguments.review:
