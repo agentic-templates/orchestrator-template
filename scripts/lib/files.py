@@ -24,8 +24,7 @@ SUPPRESSION = re.compile(
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
-# Claude Code cuts a hook's output at 10,000 characters. The session-start hook cuts what it injects to fit, and no
-# skill may be longer. test_skills.py checks that the orchestrator's skills fit together.
+# Claude Code cuts a hook's output at 10,000 characters.
 MAX_HOOK_CHARACTERS = 10_000
 # Codex reads at most 32 KiB of AGENTS.md.
 MAX_AGENTS_BYTES = 32 * 1024

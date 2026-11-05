@@ -39,8 +39,6 @@ class Tool(NamedTuple):
 
 RUFF = ["uvx", "ruff@0.17.0"]
 ZIZMOR = ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]
-# A function whose cognitive complexity is over MAX_COMPLEXITY fails the check, and --review lists each function over
-# MAX_COMPLEXITY_UNREVIEWED for a reviewer to judge.
 MAX_COMPLEXITY = 25
 MAX_COMPLEXITY_UNREVIEWED = 15
 
