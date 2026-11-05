@@ -21,13 +21,15 @@ def main() -> None:
     match = PULL_REQUEST_URL.search(json.dumps(event.get("tool_response", "")))
     if not match or "--draft" in event.get("tool_input", {}).get("command", ""):
         return
+    url = match.group()
     result = subprocess.run(
-        ["gh", "pr", "merge", "--auto", "--squash", match.group()], capture_output=True, text=True, check=False
+        ["gh", "pr", "merge", "--auto", "--squash", url], capture_output=True, text=True, check=False
     )
     message = (
-        f"Auto-merge is on for {match.group()}. GitHub merges it once its checks pass, so don't wait for them."
+        f"Auto-merge is on for {url}. GitHub merges it once its checks pass, so don't wait for them."
         if result.returncode == 0
-        else f"Turning on auto-merge for {match.group()} failed: {result.stderr.strip()}"
+        else f"Turning on auto-merge for {url} failed, so the pull request won't merge by itself. gh's error: "
+        f"{result.stderr.strip()}"
     )
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": message}}))
 

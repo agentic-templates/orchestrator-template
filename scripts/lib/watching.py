@@ -1,7 +1,6 @@
 """The checks that scripts/watch runs every minute, each returning the events that should wake the orchestrator."""
 
 import json
-import subprocess
 import time
 from pathlib import Path
 
@@ -13,11 +12,8 @@ import refreshing
 import thresholds
 import usage
 
-ROOT = usage.ROOT
 STATE = usage.LOOP / "watch.json"
-PID = usage.LOOP / "watch.pid"
 CONTEXTS = usage.LOOP / "contexts.json"
-SENDER_PID = usage.LOOP / "send-clear.pid"
 # The orchestrator holds off a refresh while the maintainer wrote to it within this many minutes.
 ACTIVE_MINUTES = 5
 # A refresh that hasn't happened this long after the request has failed, unless the sender says what it waits for.
@@ -83,6 +79,23 @@ def context_limits(model: str | None, window: int | None) -> thresholds.Context:
     return thresholds.Context(window, window, boundary, multiplier, CLAUDE_WRITE_TO_READ)
 
 
+def session_thresholds(
+    context: contexts.Context, account: str | None, window: int | None
+) -> thresholds.Thresholds | None:
+    """The thresholds of a session on the account, or None before its context has a size. Claude Code reports an
+    agent's window only at the end of a turn, and an account's plan can hold a model to a smaller window than another
+    account's, so an unknown window is the one last reported for the account and the model."""
+    if context.start is None:
+        return None
+    window = window or usage.context_window(account, context.model)
+    return thresholds.compute(context_limits(context.model, window), context.start, context.growth())
+
+
+def is_maintainer_active() -> bool:
+    """Whether the maintainer wrote to the orchestrator recently enough to hold off its refresh."""
+    return usage.minutes_since_maintainer_wrote() < ACTIVE_MINUTES
+
+
 def sessions() -> list[tuple[str, str, str | None, Path, int | None]]:
     """Each watched session that has a transcript: its notice ID, its agent type, its account, its transcript and its
     context window, if known."""
@@ -126,12 +139,8 @@ def check_contexts() -> list[str]:
     for agent_id, agent_type, account, transcript, window in sessions():
         context = contexts.update(known.get(str(transcript), contexts.Context()), transcript)
         known[str(transcript)] = context
-        if context.start is None:
+        if (limits := session_thresholds(context, account, window)) is None:
             continue
-        # Claude Code reports an agent's window only at the end of a turn, and an account's plan can hold a model to
-        # a smaller window than another account's.
-        window = window or usage.context_window(account, context.model)
-        limits = thresholds.compute(context_limits(context.model, window), context.start, context.growth())
         near_limit = notify_about_context(agent_id, agent_type, context.current, limits)
         if near_limit and not context.reported_limit:
             context.reported_limit = True
@@ -150,7 +159,7 @@ def notify_about_context(agent_id: str, agent_type: str, current: int, limits: t
         for agent in usage.running_agents():
             usage.notify(agent["id"], "wind-down", metering.WIND_DOWN)
         return [f"{agent_type}'s context is at {current:,} tokens, near its limit. Everything is winding down."]
-    active = is_orchestrator and usage.minutes_since_maintainer_wrote() < ACTIVE_MINUTES
+    active = is_orchestrator and is_maintainer_active()
     if current >= (limits.while_active if active else limits.refresh):
         usage.notify(agent_id, "context", REFRESH if is_orchestrator else HAND_OFF)
     return []
@@ -163,14 +172,14 @@ def check_refresh(state: dict) -> list[str]:
     A sender that still runs is waiting for a reason, and a request that a tool call cancelled is the Stop hook's
     to handle."""
     saved = refreshing.load_request()
-    if saved is None or refreshing.is_cancelled(saved) or is_sender_running():
+    if saved is None or refreshing.is_cancelled(saved) or usage.running_sender():
         return []
     if time.time() - saved["time"] < REFRESH_SECONDS:
         return []
     retried = state.get("refresh_retried", {})
     if retried.get("request") != saved["time"]:
         state["refresh_retried"] = {"request": saved["time"], "time": time.time()}
-        subprocess.Popen([str(ROOT / "scripts" / "send-clear")], stdin=subprocess.DEVNULL, start_new_session=True)
+        refreshing.start_sender()
         return []
     if time.time() - retried["time"] < REFRESH_SECONDS or retried.get("reported"):
         return []
@@ -180,12 +189,6 @@ def check_refresh(state: dict) -> list[str]:
     refreshing.FAILED.touch()
     waiting = refreshing.WAITING.read_text().strip() if refreshing.WAITING.exists() else ""
     return [REFRESH_FAILED + (f" The sender's reason, to pass on: {waiting}" if waiting else "")]
-
-
-def is_sender_running() -> bool:
-    """Whether scripts/send-clear still runs."""
-    pid = usage.pid_in(SENDER_PID)
-    return pid is not None and usage.is_running(pid, "send-clear")
 
 
 def check_pull_requests(state: dict) -> list[str]:

@@ -45,6 +45,12 @@ NOTE = Path(".loop") / "handoff.md"
 ORCHESTRATOR_ID = "orchestrator"
 ORCHESTRATOR = LOOP / "orchestrator.json"
 MAINTAINER = LOOP / "maintainer.json"
+# scripts/watch and scripts/send-clear each run at most once at a time, and keep their process ID here while they run.
+WATCH_PID = LOOP / "watch.pid"
+SENDER_PID = LOOP / "send-clear.pid"
+# Tells scripts/editor to take the input box's text rather than open the maintainer's editor, while scripts/send-clear
+# takes the text. scripts/editor deletes it once it has taken the text.
+TAKING_INPUT = LOOP / "taking-input"
 # The context window of each model on each account, as Claude Code reported it at the end of an agent's turn.
 CONTEXT_WINDOWS = LOOP / "context-windows.json"
 # Readings older than this tell nothing about the current burn, so the file keeps only these.
@@ -340,6 +346,16 @@ def is_running(pid: int, name: str) -> bool:
     it, or an agent's ID. Once a process has ended, its ID can go to another program, such as after a restart."""
     words = " ".join(command_line(pid)).split()
     return name in (Path(word).name for word in words)
+
+
+def running_watcher() -> int | None:
+    pid = pid_in(WATCH_PID)
+    return pid if pid is not None and is_running(pid, "watch") else None
+
+
+def running_sender() -> int | None:
+    pid = pid_in(SENDER_PID)
+    return pid if pid is not None and is_running(pid, "send-clear") else None
 
 
 def save_agent(agent: dict) -> None:

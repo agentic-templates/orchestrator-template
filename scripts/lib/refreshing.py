@@ -1,9 +1,10 @@
-"""The orchestrator's context refresh: the checks on its saved state, its request to refresh, and whether the
-request still holds."""
+"""The orchestrator's context refresh: the checks on its saved state, its request to refresh, and whether a tool
+call has cancelled the request."""
 
 import json
 import os
 import re
+import subprocess
 import time
 from collections.abc import Iterator
 from datetime import datetime
@@ -37,11 +38,11 @@ CHECKLIST = """\
 Before the refresh, prune .loop/state.md. Delete each entry that:
 - is done
 - is no longer true
-- an issue or a pull request now holds
+- an issue or a pull request now records
 - scripts/status lists, such as the running agents and the open pull requests
 
 Keep the goal you're working on, the decisions that aren't in an issue yet, what you're waiting for, and each
-temporary instruction from the maintainer that still holds, such as to start no agents until they say so."""
+temporary instruction from the maintainer that still applies, such as to start no agents until they say so."""
 
 
 def references(text: str) -> set[int]:
@@ -67,7 +68,7 @@ def findings(text: str, closed: set[int]) -> list[str]:
     ]
     if len(text) > LONG_STATE:
         found.append(
-            "The state is longer than usual. Look for entries that an issue, a pull request or scripts/status holds."
+            "The state is long. Look for entries that an issue or a pull request records, or that scripts/status lists."
         )
     return found
 
@@ -75,20 +76,45 @@ def findings(text: str, closed: set[int]) -> list[str]:
 def request(transcript: str | None) -> None:
     usage.write_atomically(REQUEST, json.dumps({"time": time.time(), "transcript": transcript}))
     characters = len(STATE.read_text()) if STATE.exists() else 0
+    logged = usage.json_lines(LOG.read_text().splitlines()) if LOG.exists() else []
+    # A tool call after a request cancels it, and the orchestrator prunes the state again before it requests the
+    # refresh again. So a session's last request replaces its earlier one in the count and the log. Sessions are told
+    # apart by their transcripts, which a request has once the status line has recorded the session's.
+    if transcript is not None and logged and logged[-1].get("transcript") == transcript:
+        long_states_before = logged.pop()["long_states_before"]
+    else:
+        long_states_before = int(LONG_STATES.read_text()) if LONG_STATES.exists() else 0
     is_long = characters > LONG_STATE
-    count = int(LONG_STATES.read_text()) + 1 if is_long and LONG_STATES.exists() else int(is_long)
-    LONG_STATES.write_text(str(count))
+    LONG_STATES.write_text(str(long_states_before + 1 if is_long else 0))
     # Kept for the dashboard: the state's size at each refresh can't be found again later.
-    LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(LOG, "a") as file:
-        file.write(json.dumps({"time": time.time(), "state_characters": characters}) + "\n")
+    entry = {
+        "time": time.time(),
+        "transcript": transcript,
+        "state_characters": characters,
+        "long_states_before": long_states_before,
+    }
+    LOG.parent.mkdir(exist_ok=True)
+    usage.write_atomically(LOG, "".join(json.dumps(line) + "\n" for line in [*logged, entry]))
+
+
+def start_sender() -> None:
+    """Starts scripts/send-clear in a process session of its own, which outlives the script that starts it. Its
+    output goes nowhere, because a process that keeps the Stop hook's output open can hold up Claude Code until it
+    exits."""
+    subprocess.Popen(
+        [str(usage.ROOT / "scripts" / "send-clear")],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def load_request() -> dict | None:
     return json.loads(REQUEST.read_text()) if REQUEST.exists() else None
 
 
-def clear() -> None:
+def forget_last_session() -> None:
     """Forgets the request, the checklist and the notices of the session before, as a new session starts. That
     session was told about its own context, and the new one has to be told again."""
     for path in (REQUEST, CHECKED, WAITING, FAILED):
@@ -96,24 +122,21 @@ def clear() -> None:
     usage.forget_notices(usage.ORCHESTRATOR_ID)
 
 
-def tool_calls_since(transcript: Path, since: float) -> bool:
-    """Whether the session called a tool after `since`, by the times its transcript gives each message."""
-    if not transcript.exists():
-        return False
-    for entry in usage.json_lines(transcript.read_bytes().splitlines()):
+def called_a_tool_since(transcript: Path, since: float) -> bool:
+    """Whether the session's latest tool call came after `since`, by the times its transcript gives each message."""
+    for entry in entries_backwards(transcript):
         if entry.get("type") != "assistant" or not entry.get("timestamp"):
             continue
         content = (entry.get("message") or {}).get("content") or []
-        calls_a_tool = any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content)
-        if calls_a_tool and datetime.fromisoformat(entry["timestamp"]).timestamp() > since:
-            return True
+        if any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content):
+            return datetime.fromisoformat(entry["timestamp"]).timestamp() > since
     return False
 
 
 def turn_running(transcript: Path) -> bool:
-    """Whether the session is in the middle of a turn: its last prompt, which includes a task notification, came
-    after its last turn ended. Claude Code doesn't show its spinner while it writes a long answer, so the screen
-    alone can't tell."""
+    """Whether the session is in the middle of a turn: its last prompt came after its last turn ended. A task
+    notification counts as a prompt. Claude Code doesn't show its spinner while it writes a long answer, so the
+    screen alone can't tell."""
     for entry in entries_backwards(transcript):
         if is_prompt(entry):
             return True
@@ -170,4 +193,4 @@ def entries_backwards(transcript: Path) -> Iterator[dict]:
 
 def is_cancelled(saved: dict) -> bool:
     """A tool call after the request means the session went on working, so its saved state may be out of date."""
-    return bool(saved.get("transcript")) and tool_calls_since(Path(saved["transcript"]), saved["time"])
+    return bool(saved.get("transcript")) and called_a_tool_since(Path(saved["transcript"]), saved["time"])

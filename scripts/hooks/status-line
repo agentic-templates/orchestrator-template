@@ -14,7 +14,8 @@ import usage
 
 
 def record_orchestrator(account: str, status: dict) -> None:
-    """Saves where the orchestrator's transcript is and how big its context window is, for scripts/watch."""
+    """Saves where the orchestrator's transcript is and how big its context window is, for scripts/watch,
+    scripts/refresh and scripts/send-clear."""
     orchestrator = usage.orchestrator()
     if orchestrator.get("account") != account or usage.orchestrator_elsewhere():
         return
@@ -31,7 +32,9 @@ def main() -> None:
     usage.record_status_line(account, status)
     record_orchestrator(account, status)
     limits = status.get("rate_limits") or {}
-    parts = [f"{name.replace('_', ' ')} {values['used_percentage']:.0f}%" for name, values in limits.items() if values]
+    parts = [
+        f"{name.replace('_', ' ')} {values['used_percentage']:.0f}% used" for name, values in limits.items() if values
+    ]
     print(" · ".join(parts) or "no usage reading yet")
 
 

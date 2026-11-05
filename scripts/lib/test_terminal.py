@@ -42,6 +42,16 @@ class ReadTest(unittest.TestCase):
         self.assertTrue(result.is_busy)
         self.assertEqual(result.box, "queued words")
 
+    def test_rules_in_an_earlier_answer_are_not_the_box(self):
+        table = ("─" * 30, "⏺ A table.", "─" * 30)
+        result = read(screen(*table, "", RULE, "\x1b[39m❯\xa0hello there", BOTTOM, STATUS))
+        self.assertEqual(result.box, "hello there")
+
+    def test_a_spinner_far_above_the_box_is_not_a_running_turn(self):
+        answer = ("⏺ one", "⏺ two", "⏺ three", "⏺ four")
+        result = read(screen(SPINNER, *answer, "✻ Worked for 23s", "", RULE, PLACEHOLDER, BOTTOM, STATUS))
+        self.assertFalse(result.is_busy)
+
     def test_a_dialog_shows_no_box(self):
         dialog = ("Do you want to proceed?", "❯ 1. Yes", "  2. No")
         result = read(screen(RULE, *dialog, "", "Esc to cancel"))

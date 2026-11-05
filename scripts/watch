@@ -44,14 +44,14 @@ def check(state: dict) -> list[str]:
 
 
 def main() -> int:
-    if (running := usage.pid_in(watching.PID)) and usage.is_running(running, "watch"):
+    if running := usage.running_watcher():
         print(f"scripts/watch runs already, as process {running}. Its exit wakes you, so you don't need another.")
         return 0
-    watching.PID.write_text(str(os.getpid()))
+    usage.WATCH_PID.write_text(str(os.getpid()))
     try:
         return watch()
     finally:
-        watching.PID.unlink(missing_ok=True)
+        usage.WATCH_PID.unlink(missing_ok=True)
 
 
 def watch() -> int:

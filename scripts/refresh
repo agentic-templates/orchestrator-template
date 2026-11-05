@@ -4,16 +4,14 @@
 # ///
 """Refreshes the orchestrator's context with /clear once its turn ends, after it has pruned its saved state.
 
-usage: scripts/refresh [--ready]
-
 Without --ready, it shows the checklist for pruning .loop/state.md, and what in the state looks out of place.
-With --ready, it requests the refresh, if the checklist was shown since the last refresh. Otherwise it shows the
-checklist first, as without --ready.
+With --ready, it requests the refresh, if it has shown the checklist since the last refresh. Otherwise it only shows
+the checklist, as without --ready, and the orchestrator runs it with --ready again once the state is pruned.
 
 The refresh happens after the turn ends. A tool call after the request cancels it, because the state may no
-longer match what the session did. Then the Stop hook tells the orchestrator to request it again. scripts/send-clear types
-/clear into the orchestrator's terminal, and the session-start hook gives the new session its skills, its state
-and the loop's status.
+longer match what the session did. Then the Stop hook scripts/hooks/refresh tells the orchestrator to request it
+again. scripts/send-clear types /clear into the orchestrator's terminal, and the session-start hook gives the new
+session its skills, its state and the loop's status.
 """
 
 import argparse
@@ -23,37 +21,49 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "lib"))
-import github
 import refreshing
 import usage
 
 
-def closed(numbers: set[int]) -> set[int]:
-    """The issues and pull requests among `numbers` that are closed. A number that names neither is left out."""
-    repository = github.repository()
+def closed(numbers: set[int]) -> tuple[set[int], dict[int, str]]:
+    """The issues and pull requests among `numbers` that are closed, and gh's error for each number it couldn't
+    read, such as one that names neither, or every number while GitHub can't be reached."""
     found = set()
-    for number in numbers:
-        state = subprocess.run(
-            ["gh", "api", f"repos/{repository}/issues/{number}", "--jq", ".state"],
+    failed = {}
+    for number in sorted(numbers):
+        # gh fills in {owner}/{repo} from the checkout's remote.
+        result = subprocess.run(
+            ["gh", "api", f"repos/{{owner}}/{{repo}}/issues/{number}", "--jq", ".state"],
             capture_output=True, text=True, check=False,
-        ).stdout.strip()  # fmt: skip
-        if state == "closed":
+        )  # fmt: skip
+        if result.returncode != 0:
+            failed[number] = result.stderr.strip()
+        elif result.stdout.strip() == "closed":
             found.add(number)
-    return found
+    return found, failed
 
 
 def show_checklist() -> None:
     text = refreshing.STATE.read_text() if refreshing.STATE.exists() else ""
+    found_closed, failed = closed(refreshing.references(text))
     print(refreshing.CHECKLIST)
-    if found := refreshing.findings(text, closed(refreshing.references(text))):
+    if found := refreshing.findings(text, found_closed):
         print("\nThe script found these in .loop/state.md. Each can still be right, so change only what's out of date:")
         print("\n".join(f"- {finding}" for finding in found))
+    if failed:
+        print(
+            "\nThe script couldn't check whether these issues or pull requests are closed, because gh failed. Leave "
+            "their entries in .loop/state.md as they are:"
+        )
+        print("\n".join(f"- #{number}: {error}" for number, error in failed.items()))
     print("\nThen run scripts/refresh --ready as the last step of your turn.")
     refreshing.CHECKED.write_text(str(time.time()))
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="scripts/refresh", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--ready", action="store_true", help="request the refresh after the checklist has been shown")
     arguments = parser.parse_args()
     if arguments.ready and refreshing.FAILED.exists():
