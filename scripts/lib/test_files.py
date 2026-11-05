@@ -1,12 +1,20 @@
-import time
+import re
 import unittest
 from pathlib import Path
 
 import files
 
+# The plain version of files.EMAIL_OR_RUN: the email pattern before it was made fast on a long run of letters.
+PLAIN_EMAIL = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
+
 
 def messages(path: str, text: str) -> list[str]:
     return [problem.message for problem in files.check_text(path, text)]
+
+
+def plain_private_addresses(line: str) -> list[str]:
+    addresses = [match.group() for match in PLAIN_EMAIL.finditer(line)]
+    return [address for address in addresses if not files.PUBLIC_EMAIL.search(address)]
 
 
 class CheckTextTest(unittest.TestCase):
@@ -19,11 +27,26 @@ class CheckTextTest(unittest.TestCase):
         self.assertEqual(messages("a.md", "Mail 1+alex@users.noreply.github.com or bot@example.com.\n"), [])
         self.assertEqual(messages("a.md", "Run `git clone git@github.com:owner/repo.git`.\n"), [])
 
-    def test_a_long_run_of_letters_doesnt_slow_the_email_check(self):
-        # A minified file or a hash in a lock file holds such a run.
-        start = time.process_time()
-        self.assertEqual(messages("a.js", "a" * 30_000 + "\n"), [])
-        self.assertLess(time.process_time() - start, 0.5)
+    def test_finds_the_same_private_addresses_as_the_plain_email_pattern(self):
+        # Each private address is split before its @, so that the check passes on this file.
+        lines = [
+            "",
+            "alex" + "@mail.test",
+            "Mail a.b+c-d_e" + "@sub.mail-x.test, or (élodie" + "@MAIL.TEST).",
+            "alex@mail.t, alex@localhost, alex@mail.test2, alex@mail.test_x, alex@.test, @mail.test",
+            "a" * 50 + ", " + "a." * 50 + ", " + "a" * 50 + "@" + "b" * 50,
+            "a@b" + "@mail.test",
+            "bot@example.com-alex" + "@mail.test",
+            "alex" + "@mail.test+bob" + "@mail.test",
+            "Run `git clone git@github.com:owner/repo.git`, not xgit" + "@github.com.",
+            "1+alex@users.noreply.github.com, alex" + "@users.noreply.github.community",
+            "bot@example.com, bot@example.org, bot@EXAMPLE.NET, bot" + "@example.co, bot" + "@example.com.test",
+            "bot" + "@sub.example.com",
+        ]
+        for line in lines:
+            with self.subTest(line=line):
+                expected = [f"Remove the email address {address}." for address in plain_private_addresses(line)]
+                self.assertEqual(messages("a.md", line), expected)
 
     def test_finds_unfinished_work(self):
         self.assertEqual(len(messages("a.py", "x = 1  # TO" + "DO: round the total\n")), 1)

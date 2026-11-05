@@ -6,9 +6,11 @@ from pathlib import PurePosixPath
 from prose import Problem
 
 HOME_PATH = re.compile(r"(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]+")
-# An address starts only where a run of the characters it may hold starts. Otherwise the search starts again at each
-# character of a long run, such as a hash in a lock file, and 30,000 letters took 2.3 CPU seconds.
-EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
+# An address may start at any character of a run of the characters it may hold. With the address alone, the search
+# started again at each character of a long run that holds no address, such as a hash in a lock file, which took 1.03
+# CPU seconds at 20,000 letters and 4.15 at 40,000. The second alternative takes in such a run whole, so the search
+# moves past it.
+EMAIL_OR_RUN = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b|[\w.+-]+")
 # A clone address over SSH, such as git@github.com, has the form of an email address.
 PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
 # Spelled in parts, because this rule applies to this file too.
@@ -34,13 +36,17 @@ def check_text(path: str, text: str) -> list[Problem]:
     for number, line in enumerate(text.splitlines(), start=1):
         if HOME_PATH.search(line):
             problems.append(Problem(number, "Remove the local path. Paths in a home folder are private."))
-        for match in EMAIL.finditer(line):
-            if not PUBLIC_EMAIL.search(match.group()):
-                problems.append(Problem(number, f"Remove the email address {match.group()}."))
+        for address in email_addresses(line):
+            if not PUBLIC_EMAIL.search(address):
+                problems.append(Problem(number, f"Remove the email address {address}."))
         if marker := UNFINISHED.search(line):
             advice = "Finish the work or leave it out, and list what's left in your report."
             problems.append(Problem(number, f'"{marker.group()}" marks unfinished work. {advice}'))
     return problems + check_suppressions(path, text) + check_size(path, text)
+
+
+def email_addresses(line: str) -> list[str]:
+    return [match.group() for match in EMAIL_OR_RUN.finditer(line) if "@" in match.group()]
 
 
 def check_suppressions(path: str, text: str) -> list[Problem]:
