@@ -6,10 +6,10 @@ from pathlib import PurePosixPath
 from prose import Problem
 
 HOME_PATH = re.compile(r"(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]+")
-# An address may start at any character of a run of the characters it may hold. With the address alone, the search
-# started again at each character of a long run that holds no address, such as a hash in a lock file, which took 1.03
-# CPU seconds at 20,000 letters and 4.15 at 40,000. The second alternative takes in such a run whole, so the search
-# moves past it.
+# An address may start at any character of a run of the characters it may hold. Without the second alternative, the
+# search starts again at each character of a long run without an address, such as a hash in a lock file. That takes
+# 1.03 CPU seconds on a run of 20,000 characters and 4.15 on one of 40,000. The second alternative takes in such a run
+# whole, so the search moves past it.
 EMAIL_OR_RUN = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b|[\w.+-]+")
 # A clone address over SSH, such as git@github.com, has the form of an email address.
 PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
@@ -24,7 +24,7 @@ SUPPRESSION = re.compile(
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
-# Claude Code cuts a hook's output at 10,000 characters.
+# Claude Code cuts the context that a hook injects at 10,000 characters.
 MAX_HOOK_CHARACTERS = 10_000
 # Codex reads at most 32 KiB of AGENTS.md.
 MAX_AGENTS_BYTES = 32 * 1024

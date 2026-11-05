@@ -7,8 +7,8 @@ from prose import lines, prose_words
 TYPES = ("feat", "fix", "docs", "test", "refactor", "perf", "build", "ci", "revert", "chore")
 TITLE = re.compile(r"^(" + "|".join(TYPES) + r")(\([^)]+\))?!?: \S")
 CLOSES = re.compile(r"^\s*(closes|fixes|resolves) #(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
-# Past this, a description describes the code or the history of the branch. Measured on 169 merged pull requests of a
-# template this one came from: the limit blocked 3, a research result and two that mostly described the code.
+# Measured on 169 merged pull requests of agentic-templates/agent-template, the limit blocked 3. Two mostly described
+# the code. The third was a research result, which is why research results are exempt.
 MAX_PROSE_WORDS = 500
 MAX_CELL_WORDS = 40
 MAX_PATH_LINES = 2
