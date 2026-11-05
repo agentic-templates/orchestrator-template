@@ -7,8 +7,9 @@ from prose import lines, prose_words
 TYPES = ("feat", "fix", "docs", "test", "refactor", "perf", "build", "ci", "revert", "chore")
 TITLE = re.compile(r"^(" + "|".join(TYPES) + r")(\([^)]+\))?!?: \S")
 CLOSES = re.compile(r"^\s*(closes|fixes|resolves) #(\d+)\s*$", re.IGNORECASE | re.MULTILINE)
-# Past this, a description describes the code or the history of the branch. Research results are exempt.
-# Measured on merged pull requests of the templates this one came from: it blocks almost only those.
+# Past this, a description describes the code or the history of the branch. Measured on 169 merged pull requests of a
+# template this one came from: the limit blocked 3, a research result and two that mostly described the code. A
+# description that closes a research issue may be longer.
 MAX_PROSE_WORDS = 500
 MAX_CELL_WORDS = 40
 MAX_PATH_LINES = 2
@@ -35,12 +36,20 @@ def closed_issues(body: str) -> list[int]:
 def check_body(body: str, is_research: bool) -> list[str]:
     """The problems in a description. `is_research` says whether the issue it closes is a research issue."""
     problems = []
-    if len(closed_issues(body)) != 1:
-        problems.append('Start the description with one line "Closes #<issue>", for the one issue it builds.')
-    if not is_research and prose_words(body) > MAX_PROSE_WORDS:
+    issues = closed_issues(body)
+    if not issues:
+        problems.append('Start the description with a line "Closes #<issue>", for the issue the pull request builds.')
+    elif len(issues) > 1:
+        numbers = ", ".join(f"#{issue}" for issue in issues)
         problems.append(
-            "The description is longer than a later reader will take in. Cut the sentences that describe "
-            "how the code works, repeat the issue or tell the history of the branch."
+            f"The description has a line that closes each of {numbers}. Keep only the one for the issue the pull "
+            "request builds."
+        )
+    words = prose_words(body)
+    if not is_research and words > MAX_PROSE_WORDS:
+        problems.append(
+            f"The description has {words} words outside tables and code, and the limit is {MAX_PROSE_WORDS}. Cut the "
+            "sentences that describe how the code works, repeat the issue or tell the history of the branch."
         )
     path_lines = [line for line in body.splitlines() if PATH_ITEM.match(line)]
     if len(path_lines) > MAX_PATH_LINES:
@@ -57,5 +66,8 @@ def check_body(body: str, is_research: bool) -> list[str]:
                 "without them, in sentences and lists."
             )
         if line.kind == "table" and any(len(cell.split()) > MAX_CELL_WORDS for cell in line.text.split("|")):
-            problems.append(f"Line {line.number} holds a paragraph in a table cell. Put sentences outside tables.")
+            problems.append(
+                f"Line {line.number} has a table cell of more than {MAX_CELL_WORDS} words. Move the long text out of "
+                "the table."
+            )
     return problems
