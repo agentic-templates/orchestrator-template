@@ -164,7 +164,7 @@ def check_files(paths: list[str]) -> list[str]:
     return problems
 
 
-def run_tools(paths: list[str], tools: list = TOOLS, tests: list = TESTS) -> bool:
+def run_tools(paths: list[str], tools: list[Tool]) -> bool:
     kinds = {path: kind(path) for path in paths}
     passed = True
     for tool in tools:
@@ -173,7 +173,12 @@ def run_tools(paths: list[str], tools: list = TOOLS, tests: list = TESTS) -> boo
             passed = False
             if tool.hint:
                 print(tool.hint, flush=True)
-    for command in tests:
+    return passed
+
+
+def run_on_the_project(commands: list[list[str]]) -> bool:
+    passed = True
+    for command in commands:
         if subprocess.run(command, check=False, cwd=ROOT).returncode != 0:
             passed = False
     return passed
@@ -187,14 +192,15 @@ def main() -> int:
     arguments = parser.parse_args()
     paths = regular_files(git("ls-files") if arguments.all else changed_files(arguments.base))
     if arguments.review:
-        run_tools(paths, REVIEW_TOOLS, tests=[])
+        run_tools(paths, REVIEW_TOOLS)
         return 0
     problems = check_files(paths)
     print("\n".join(problems), end="\n" if problems else "", flush=True)
     loop_files = git("ls-files", "--cached", "--others", "--exclude-standard", "scripts")
     loop_python = [path for path in regular_files(loop_files) if kind(path) == "loop-python"]
-    tools_passed = run_tools(paths, tests=[*TESTS, [*LOOP_TY, *loop_python]])
-    return 0 if tools_passed and not problems else 1
+    tools_passed = run_tools(paths, TOOLS)
+    project_passed = run_on_the_project([*TESTS, [*LOOP_TY, *loop_python]])
+    return 0 if tools_passed and project_passed and not problems else 1
 
 
 if __name__ == "__main__":
