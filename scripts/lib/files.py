@@ -15,13 +15,18 @@ EMAIL_OR_RUN = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2
 PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
 # Spelled in parts, because this rule applies to this file too.
 UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
-# Comments and attributes that make a linter or a type checker skip code, in the common languages.
-# Each must give its reason, with the word "because", on its own line or the line above.
+# Comments and attributes that make a linter or a type checker skip code, and the calls and attributes that skip a
+# test, in the common languages. Each must give its reason, with the word "because", on its own line or the line above.
 SUPPRESSION = re.compile(
     r"(?i:#\s*((ruff|flake8):\s*)?noqa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
     r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
     r"|@ts-(ignore|expect-error|nocheck)|biome-ignore|//\s*nolint|#!?\[allow\(|@SuppressWarnings"
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore|#\s*shellcheck\s.*\bdisable="
+    r"|^\s*@(unittest\.)?skip(If|Unless)?\b|\.skipTest\(|\bpytest\.(mark\.skip(if)?\b|skip\()"
+    # A JavaScript test marker counts only before .each, a test name in quotes or the end of the line, because a
+    # Rust iterator named it has a skip that takes a number.
+    r"|(?<![\w.$])(x(it|test|describe)|(it|test|describe)\.skip)(\.each\b|\(\s*([\"'`]|$))"
+    r"|(?<![\w.])[tb]\.Skip(f|Now)?\(|#\[ignore\b"
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
 # Claude Code cuts the context that a hook injects at 10,000 characters.

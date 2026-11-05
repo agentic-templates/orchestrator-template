@@ -62,12 +62,43 @@ class CheckTextTest(unittest.TestCase):
             ("a.py", "# ruff: dis" + "able[F401]"),
             ("a.yml", "- uses: actions/checkout@v4 # zizmor:" + " ignore[unpinned-uses]"),
             ("a.yml", "          # shell" + "check disable=SC2086"),
+            ("a.py", "@unittest.sk" + 'ip("needs a network")'),
+            ("a.py", "    @unittest.sk" + 'ipIf(sys.platform == "win32", "needs a POSIX shell")'),
+            ("a.py", "    @unittest.sk" + 'ipUnless(HAS_UV, "needs uv")'),
+            ("a.py", "@sk" + 'ip("needs a network")'),
+            ("a.py", "        self.sk" + 'ipTest("needs a network")'),
+            ("a.py", "@pytest.mark.sk" + 'ip(reason="needs a network")'),
+            ("a.py", "@pytest.mark.sk" + 'ipif(sys.platform == "win32", reason="needs a POSIX shell")'),
+            ("a.py", "    pytest.sk" + 'ip("needs a network")'),
+            ("a.test.ts", "it.sk" + 'ip("adds the totals", () => {'),
+            ("a.test.ts", "test.sk" + "ip('adds the totals', () => {"),
+            ("a.test.ts", "describe.sk" + "ip(`import`, () => {"),
+            ("a.test.ts", "it.sk" + "ip.each(cases)('adds %s', (amount) => {"),
+            ("a.test.ts", "it.sk" + "ip("),
+            ("a.test.js", "x" + 'it("adds the totals", () => {'),
+            ("a.test.js", "x" + 'test("adds the totals", () => {'),
+            ("a.test.js", "x" + 'describe("import", () => {'),
+            ("a_test.go", "\tt.Sk" + 'ip("needs a network")'),
+            ("a_test.go", "\tt.Sk" + 'ipf("needs %s", tool)'),
+            ("a_test.go", "\tt.Sk" + "ipNow()"),
+            ("a_test.go", "\tb.Sk" + 'ip("needs a network")'),
+            ("a.rs", "#[ign" + "ore]"),
+            ("a.rs", "#[ign" + 'ore = "needs a network"]'),
         ):
             with self.subTest(suppression=suppression):
                 self.assertEqual(len(messages(path, suppression + "\n")), 1)
+                self.assertEqual(messages(path, suppression + " because the reason is here\n"), [])
+                self.assertEqual(messages(path, "// Kept because the reason is here.\n" + suppression + "\n"), [])
 
     def test_accepts_code_that_only_looks_like_a_suppression(self):
-        for path, line in (("a.sh", "# shellcheck source=lib/common.sh"),):
+        for path, line in (
+            ("a.py", "if skip_tests:"),
+            ("a.py", 'sys.exit("The file is missing.")'),
+            ("a.js", "xtest = load(rows)"),
+            ("a.rs", "let rest = it.skip(1);"),
+            ("a.cs", "var page = result.Skip(20);"),
+            ("a.sh", "# shellcheck source=lib/common.sh"),
+        ):
             with self.subTest(line=line):
                 self.assertEqual(messages(path, line + "\n"), [])
 
