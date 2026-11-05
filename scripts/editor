@@ -7,8 +7,8 @@
 usage: scripts/editor <file>
 
 When scripts/send-clear takes text out of the orchestrator's input box, scripts/editor saves the text to
-.loop/unsent/, and the input box comes back empty. At any other time, scripts/editor opens the maintainer's own
-editor: the one in $VISUAL, or else $EDITOR, when scripts/orchestrate started, or else vi.
+.loop/unsent/, and the input box comes back empty. Otherwise it opens the maintainer's own editor. scripts/orchestrate
+takes that editor from $VISUAL or $EDITOR when it starts.
 """
 
 import os

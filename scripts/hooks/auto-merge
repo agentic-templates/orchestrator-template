@@ -28,8 +28,8 @@ def main() -> None:
     message = (
         f"Auto-merge is on for {url}. GitHub merges it once its checks pass, so don't wait for them."
         if result.returncode == 0
-        else f"Turning on auto-merge for {url} failed, so the pull request won't merge by itself. Say so in your "
-        f"report. gh's error: {result.stderr.strip()}"
+        else f"Turning on auto-merge for {url} failed, so the pull request won't merge by itself. gh's error: "
+        f"{result.stderr.strip()}"
     )
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": message}}))
 
