@@ -6,7 +6,9 @@ from pathlib import PurePosixPath
 from prose import Problem
 
 HOME_PATH = re.compile(r"(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]+")
-EMAIL = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
+# An address starts only where a run of the characters it may hold starts. Otherwise the search starts again at each
+# character of a long run, such as a hash in a lock file, and 30,000 letters took 2.3 CPU seconds.
+EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
 # A clone address over SSH, such as git@github.com, has the form of an email address.
 PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
 # Spelled in two parts, so that this file doesn't break its own rule.

@@ -1,3 +1,4 @@
+import time
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,12 @@ class CheckTextTest(unittest.TestCase):
     def test_accepts_public_addresses(self):
         self.assertEqual(messages("a.md", "Mail 1+alex@users.noreply.github.com or bot@example.com.\n"), [])
         self.assertEqual(messages("a.md", "Run `git clone git@github.com:owner/repo.git`.\n"), [])
+
+    def test_a_long_run_of_letters_doesnt_slow_the_email_check(self):
+        # A minified file or a hash in a lock file holds such a run.
+        start = time.process_time()
+        self.assertEqual(messages("a.js", "a" * 30_000 + "\n"), [])
+        self.assertLess(time.process_time() - start, 0.5)
 
     def test_finds_unfinished_work(self):
         self.assertEqual(len(messages("a.py", "x = 1  # TO" + "DO: round the total\n")), 1)
