@@ -43,6 +43,8 @@ COMPLEXIPY_FIXED_SETTINGS = [
     "--staged=false",
 ]
 
+ZIZMOR = ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]
+
 # Each tool runs once, on the changed files of its kind, with the files appended to its command. The loop-python
 # tools take their settings from scripts/ruff.toml and their own flags, so that a project's settings, such as a ruff
 # section in its pyproject.toml, don't change the loop's checks. complexipy reads its settings from the pyproject.toml
@@ -69,7 +71,9 @@ TOOLS = [
         " it is, and end its `def` line with `# complexipy: ignore because <why the function reads best as it is>`.",
     ),
     Tool("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
-    Tool("workflow", ["uvx", "zizmor@1.30.1", "--offline", "--quiet"]),
+    Tool("workflow", ZIZMOR),
+    # zizmor also audits Dependabot's settings, which actionlint can't read.
+    Tool("dependabot", ZIZMOR),
     Tool("any", ["uvx", "typos@1.51.1"]),
 ]
 # With --review, these run instead, and list what a reviewer should judge without failing the check.
@@ -141,8 +145,10 @@ def regular_files(paths: list[str]) -> list[str]:
 
 
 def kind(path: str) -> str:
-    if path.startswith(".github/workflows/") and path.endswith(".yml"):
+    if path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")):
         return "workflow"
+    if path in (".github/dependabot.yml", ".github/dependabot.yaml"):
+        return "dependabot"
     if not is_python(path):
         return "other"
     return "loop-python" if path.startswith("scripts/") else "python"

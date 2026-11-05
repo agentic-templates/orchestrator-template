@@ -55,7 +55,7 @@ class CheckTest(TemporaryLoopTest):
     def files_given_to(self, tool: str) -> list[str]:
         """The files at the end of the command that names the tool, such as "typos@", which every file goes to."""
         commands = (self.root / "commands").read_text().splitlines()
-        command = next(command for command in commands if tool in command)
+        command = next((command for command in commands if tool in command), "")
         return [word for word in command.split() if (self.repository / word).is_file()]
 
 
@@ -111,6 +111,20 @@ class FileNamesTest(CheckTest):
     def test_checks_a_file_whose_name_has_a_letter_outside_ascii(self):
         self.write("docs/café.md", "It simply works.\n")
         self.assertIn('docs/café.md:1: Cut "simply".', self.check()[1])
+
+
+class GitHubFilesTest(CheckTest):
+    def test_checks_a_workflow_named_yaml_as_a_workflow(self):
+        self.write(".github/workflows/extra.yaml")
+        self.check()
+        self.assertEqual(self.files_given_to("actionlint"), [".github/workflows/extra.yaml"])
+        self.assertEqual(self.files_given_to("zizmor@"), [".github/workflows/extra.yaml"])
+
+    def test_audits_dependabots_settings_for_security(self):
+        self.write(".github/dependabot.yml")
+        self.check()
+        self.assertEqual(self.files_given_to("zizmor@"), [".github/dependabot.yml"])
+        self.assertNotIn("actionlint", (self.root / "commands").read_text())
 
 
 class DeletedFilesTest(CheckTest):
