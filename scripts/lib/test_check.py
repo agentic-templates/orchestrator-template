@@ -122,8 +122,8 @@ class CheckTest(unittest.TestCase):
     first commit holds a loop script without .py that runs python3. The branch left from that commit, and main has a
     later commit that the branch doesn't have. The branch's one commit adds a file and deletes another. Besides a
     staged, a changed and an untracked file and a file deleted only from the folder, the untracked files are a Markdown
-    file that breaks a rule and has a letter outside ASCII in its name, a workflow, Dependabot's settings and a new loop
-    script."""
+    file that breaks a rule and has a letter outside ASCII in its name, a workflow, Dependabot's settings, a composite
+    action, an action.yml outside .github/actions/ and a new loop script."""
 
     @classmethod
     def setUpClass(cls):
@@ -152,6 +152,7 @@ class CheckTest(unittest.TestCase):
         repository.write(".github/workflows/extra.yaml")
         repository.write(".github/dependabot.yml")
         repository.write(".github/actions/setup/action.yml")
+        repository.write("docs/action.yml")
         repository.write("scripts/lib/new.py", "TOTAL = 1\n")
         cls.plain = repository.check()
         cls.with_base = repository.check("--base", "HEAD~1")
@@ -166,6 +167,7 @@ class CheckTest(unittest.TestCase):
                     ".github/dependabot.yml",
                     ".github/workflows/extra.yaml",
                     "committed.txt",
+                    "docs/action.yml",
                     "docs/café.md",
                     "scripts/lib/new.py",
                     "staged.txt",
@@ -189,6 +191,10 @@ class CheckTest(unittest.TestCase):
     def test_audits_dependabots_settings_and_composite_actions_for_security(self):
         files = [".github/actions/setup/action.yml", ".github/dependabot.yml"]
         self.assertIn(files, self.plain.files_given_to("zizmor@"))
+
+    def test_keeps_an_action_yml_outside_github_actions_from_zizmor(self):
+        audited = [path for paths in self.plain.files_given_to("zizmor@") for path in paths]
+        self.assertNotIn("docs/action.yml", audited)
 
     def test_leaves_out_deleted_files_without_crashing(self):
         # files_given_to leaves out paths that aren't files, so this reads the commands themselves.
