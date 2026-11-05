@@ -18,6 +18,7 @@ NARRATION = re.compile(
     r"|\b(fix|review) rounds?\b|\bround \d\b",
     re.IGNORECASE,
 )
+BOLD_LINE = re.compile(r"^\s*(\*\*[^*]+\*\*|__[^_]+__):?\s*$")
 
 
 def check_title(title: str) -> list[str]:
@@ -48,6 +49,10 @@ def check_body(body: str, is_research: bool) -> list[str]:
             problems.append(
                 f'"{match.group()}" tells how the work went. Describe the final change instead, as if it had '
                 "been made in one go."
+            )
+        if line.kind == "heading" or (line.kind == "prose" and BOLD_LINE.match(line.text)):
+            problems.append(
+                f"Line {line.number} is a heading. Write the description without headings, in sentences and lists."
             )
         if line.kind == "table" and any(len(cell.split()) > MAX_CELL_WORDS for cell in line.text.split("|")):
             problems.append(f"Line {line.number} holds a paragraph in a table cell. Put sentences outside tables.")

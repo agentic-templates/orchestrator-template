@@ -44,6 +44,18 @@ class BodyTest(unittest.TestCase):
         cell = " ".join(["word"] * 50)
         self.assertEqual(len(pull_request.check_body(f"{BODY}\n| a | {cell} |\n", is_research=False)), 1)
 
+    def test_rejects_headings_and_lines_of_bold_text(self):
+        body = BODY + "\n## Why\n\n**What changed:**\n\n__Tests__\n"
+        heading = "is a heading. Write the description without headings, in sentences and lists."
+        self.assertEqual(
+            pull_request.check_body(body, is_research=False),
+            [f"Line 5 {heading}", f"Line 7 {heading}", f"Line 9 {heading}"],
+        )
+
+    def test_accepts_bold_words_inside_a_sentence(self):
+        sentences = "The import **skips** expenses it has.\n- **Dates** stay as they were.\n**Both** imports agree.\n"
+        self.assertEqual(pull_request.check_body(BODY + sentences, is_research=False), [])
+
 
 if __name__ == "__main__":
     unittest.main()
