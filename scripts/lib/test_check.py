@@ -129,6 +129,11 @@ class LoopScriptsTest(CheckTest):
         self.check()
         self.assertEqual(self.files_given_to("ty@"), ["scripts/check", "scripts/lib/files.py", "scripts/lib/prose.py"])
 
+    def test_type_checks_a_new_loop_script_before_it_is_committed(self):
+        self.write("scripts/lib/new.py", "TOTAL = 1\n")
+        self.check()
+        self.assertIn("scripts/lib/new.py", self.files_given_to("ty@"))
+
     def test_runs_the_loop_tests_without_the_current_folder_on_the_import_path(self):
         self.write("notes.txt")
         self.check()

@@ -194,7 +194,8 @@ def main() -> int:
         return 0
     problems = check_files(paths)
     print("\n".join(problems), end="\n" if problems else "", flush=True)
-    loop_python = [path for path in regular_files(git("ls-files", "scripts")) if kind(path) == "loop-python"]
+    loop_files = git("ls-files", "--cached", "--others", "--exclude-standard", "scripts")
+    loop_python = [path for path in regular_files(loop_files) if kind(path) == "loop-python"]
     tools_passed = run_tools(paths, tests=[*TESTS, [*LOOP_TY, *loop_python]])
     return 0 if tools_passed and not problems else 1
 
