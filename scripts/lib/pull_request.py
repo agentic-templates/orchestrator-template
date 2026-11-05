@@ -41,8 +41,8 @@ def check_body(body: str, is_research: bool) -> list[str]:
     elif len(issues) > 1:
         numbers = ", ".join(f"#{issue}" for issue in issues)
         problems.append(
-            f"The description has a line that closes each of {numbers}. Keep only the one for the issue the pull "
-            "request builds."
+            f"The description closes several issues, with one line for each: {numbers}. Keep only the line for the "
+            "issue the pull request builds."
         )
     words = prose_words(body)
     if not is_research and words > MAX_PROSE_WORDS:
