@@ -11,12 +11,12 @@ HOME_PATH = re.compile(r"(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]+")
 EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
 # A clone address over SSH, such as git@github.com, has the form of an email address.
 PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
-# Spelled in two parts, so that this file doesn't break its own rule.
+# Spelled in parts, because this rule applies to this file too.
 UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
 # Comments and attributes that make a linter or a type checker skip code, in the common languages.
 # Each must give its reason, starting with "because", on its own line or the line above.
 SUPPRESSION = re.compile(
-    r"(?i:#\s*((ruff|flake8):\s*)?no" + r"qa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
+    r"(?i:#\s*((ruff|flake8):\s*)?noqa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
     r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
     r"|@ts-(ignore|expect-error|nocheck)|biome-ignore|//\s*nolint|#!?\[allow\(|@SuppressWarnings"
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
