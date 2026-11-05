@@ -151,6 +151,7 @@ class CheckTest(unittest.TestCase):
         repository.write("docs/café.md", "It simply works.\n")
         repository.write(".github/workflows/extra.yaml")
         repository.write(".github/dependabot.yml")
+        repository.write(".github/actions/setup/action.yml")
         repository.write("scripts/lib/new.py", "TOTAL = 1\n")
         cls.plain = repository.check()
         cls.with_base = repository.check("--base", "HEAD~1")
@@ -161,6 +162,7 @@ class CheckTest(unittest.TestCase):
             self.plain.files_given_to("typos@"),
             [
                 [
+                    ".github/actions/setup/action.yml",
                     ".github/dependabot.yml",
                     ".github/workflows/extra.yaml",
                     "committed.txt",
@@ -184,8 +186,9 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(self.plain.files_given_to("actionlint"), [[".github/workflows/extra.yaml"]])
         self.assertIn([".github/workflows/extra.yaml"], self.plain.files_given_to("zizmor@"))
 
-    def test_audits_dependabots_settings_for_security(self):
-        self.assertIn([".github/dependabot.yml"], self.plain.files_given_to("zizmor@"))
+    def test_audits_dependabots_settings_and_composite_actions_for_security(self):
+        files = [".github/actions/setup/action.yml", ".github/dependabot.yml"]
+        self.assertIn(files, self.plain.files_given_to("zizmor@"))
 
     def test_leaves_out_deleted_files_without_crashing(self):
         # files_given_to leaves out paths that aren't files, so this reads the commands themselves.

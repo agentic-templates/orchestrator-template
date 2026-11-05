@@ -80,8 +80,8 @@ TOOLS = [
     ),
     Tool("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
     Tool("workflow", ZIZMOR),
-    # zizmor also audits Dependabot's settings, which actionlint can't read.
-    Tool("dependabot", ZIZMOR),
+    # zizmor also audits Dependabot's settings and composite actions, which actionlint can't read.
+    Tool("zizmor-only", ZIZMOR),
     Tool("any", ["uvx", "typos@1.51.1"]),
 ]
 # With --review, these run instead, and list what a reviewer should judge without failing the check.
@@ -139,7 +139,9 @@ def kind(path: str) -> str:
     if path.startswith(".github/workflows/") and path.endswith((".yml", ".yaml")):
         return "workflow"
     if path in (".github/dependabot.yml", ".github/dependabot.yaml"):
-        return "dependabot"
+        return "zizmor-only"
+    if Path(path).name in ("action.yml", "action.yaml"):
+        return "zizmor-only"
     if not is_python(path):
         return "other"
     return "loop-python" if path.startswith("scripts/") else "python"
