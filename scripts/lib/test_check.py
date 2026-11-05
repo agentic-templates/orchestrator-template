@@ -65,6 +65,11 @@ class ExitStatusTest(CheckTest):
         self.write("notes.txt")
         self.assertEqual(self.check()[0], 1)
 
+    def test_fails_when_the_loop_tests_fail(self):
+        self.stand_in("uv", "exit 1")
+        self.write("notes.txt")
+        self.assertEqual(self.check()[0], 1)
+
     def test_fails_when_a_file_breaks_a_rule(self):
         self.write("docs/guide.md", "It simply works.\n")
         status, output = self.check()
