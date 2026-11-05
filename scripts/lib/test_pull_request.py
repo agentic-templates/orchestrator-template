@@ -45,7 +45,10 @@ class BodyTest(unittest.TestCase):
         self.assertEqual(len(pull_request.check_body(f"{BODY}\n| a | {cell} |\n", is_research=False)), 1)
 
     def test_rejects_headings_and_bold_text_that_stands_as_one(self):
-        body = BODY + "\n## Why\n\n**What changed:** the import skips them.\n\n__Tests__\n\n**Why**: the import doubled them.\n"
+        body = (
+            BODY
+            + "\n## Why\n\n**What changed:** the import skips them.\n\n__Tests__\n\n**Why**: the import doubled them.\n"
+        )
         after_the_line_number = (
             "is a heading, or starts with bold text that stands as one. Write the description without them, "
             "in sentences and lists."
