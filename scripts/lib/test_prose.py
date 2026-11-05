@@ -15,7 +15,10 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(
             messages("It adds the expense; then it saves.\nIt saves — then it exits.\n"),
             [
-                "Write two sentences, or use a comma, instead of joining with a semicolon.",
+                (
+                    "Write two sentences instead of joining them with a semicolon. In a title or a heading, which "
+                    'holds one sentence, link the two parts with a word such as "and", or keep only one of them.'
+                ),
                 "Write two sentences, or use a comma, instead of joining with a dash.",
             ],
         )

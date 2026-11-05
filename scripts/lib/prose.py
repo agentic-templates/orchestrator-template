@@ -86,9 +86,11 @@ def check(text: str) -> list[Problem]:
     ]
     for line in lines(text):
         if ";" in line.text and line.kind != "table":
-            problems.append(
-                Problem(line.number, "Write two sentences, or use a comma, instead of joining with a semicolon.")
+            advice = (
+                "Write two sentences instead of joining them with a semicolon. In a title or a heading, which holds "
+                'one sentence, link the two parts with a word such as "and", or keep only one of them.'
             )
+            problems.append(Problem(line.number, advice))
         if JOINING_DASH.search(line.text):
             problems.append(
                 Problem(line.number, "Write two sentences, or use a comma, instead of joining with a dash.")
