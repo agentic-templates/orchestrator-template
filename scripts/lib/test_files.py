@@ -4,7 +4,7 @@ from pathlib import Path
 
 import files
 
-# The plain version of files.EMAIL_OR_RUN: the email pattern before it was made fast on a long run of letters.
+# The plain version of files.EMAIL_OR_RUN, which must find the same addresses as it. Change the two together.
 PLAIN_EMAIL = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
 
 
@@ -65,9 +65,9 @@ class CheckTextTest(unittest.TestCase):
             with self.subTest(suppression=suppression):
                 self.assertEqual(len(messages(path, suppression + "\n")), 1)
 
-    def test_only_docs_and_this_file_may_name_suppressions(self):
-        this_file = Path(files.__file__).read_text()
-        self.assertNotEqual(messages("scripts/lib/other.py", this_file), [])
+    def test_only_docs_and_files_py_may_name_suppressions(self):
+        files_py = Path(files.__file__).read_text()
+        self.assertNotEqual(messages("scripts/lib/other.py", files_py), [])
         self.assertEqual(messages("docs/linting.md", "Write `# no" + "qa: F401` on the line.\n"), [])
 
     def test_a_skill_may_have_at_most_10000_characters(self):

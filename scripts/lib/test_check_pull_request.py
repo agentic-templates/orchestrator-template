@@ -18,7 +18,7 @@ class CheckPullRequestTest(TemporaryLoopTest):
         )
         return result.returncode, result.stdout + result.stderr
 
-    def test_prints_each_problem_as_an_error_for_github_actions_and_fails(self):
+    def test_prints_a_problem_as_an_error_for_github_actions_and_exits_with_1(self):
         status, output = self.check("Skip duplicate expenses")
         self.assertEqual(status, 1)
         self.assertTrue(output.startswith('::error::The title "Skip duplicate expenses" doesn\'t follow'), output)

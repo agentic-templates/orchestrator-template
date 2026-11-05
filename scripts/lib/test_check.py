@@ -18,12 +18,13 @@ class Run(NamedTuple):
     status: int
     output: str
     commands: list[str]
-    repository: Path
+    root: Path
 
     def files_given_to(self, tool: str) -> list[list[str]]:
-        """The files at the end of each command that names the tool, such as "typos@", which every file goes to."""
+        """For each command that names the tool, such as "typos@", which every file goes to, every word of the command
+        that is a file in the repository."""
         return [
-            [word for word in command.split() if (self.repository / word).is_file()]
+            [word for word in command.split() if (self.root / word).is_file()]
             for command in self.commands
             if tool in command
         ]
@@ -36,11 +37,11 @@ class Repository:
 
     def __init__(self, folder: Path):
         self.folder = folder
-        self.path = folder / "repository"
-        (self.path / "scripts" / "lib").mkdir(parents=True)
-        shutil.copy(SCRIPTS / "check", self.path / "scripts")
+        self.root = folder / "repository"
+        (self.root / "scripts" / "lib").mkdir(parents=True)
+        shutil.copy(SCRIPTS / "check", self.root / "scripts")
         for module in ("files.py", "prose.py"):
-            shutil.copy(SCRIPTS / "lib" / module, self.path / "scripts" / "lib")
+            shutil.copy(SCRIPTS / "lib" / module, self.root / "scripts" / "lib")
         self.environment = os.environ.copy()
         # The tests of scripts/check run inside scripts/check, which sets PYTHONSAFEPATH for them.
         self.environment.pop("PYTHONSAFEPATH", None)
@@ -64,11 +65,11 @@ class Repository:
         path.chmod(0o755)
 
     def git(self, *arguments: str) -> None:
-        subprocess.run(["git", *arguments], cwd=self.path, env=self.environment, check=True, capture_output=True)
+        subprocess.run(["git", *arguments], cwd=self.root, env=self.environment, check=True, capture_output=True)
 
     def write(self, path: str, text: str = "words\n") -> None:
-        (self.path / path).parent.mkdir(parents=True, exist_ok=True)
-        (self.path / path).write_text(text)
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / path).write_text(text)
 
     def commit(self, message: str) -> None:
         self.git("add", "--all")
@@ -78,7 +79,7 @@ class Repository:
         result = subprocess.run(
             [sys.executable, "scripts/check", *arguments],
             check=False,
-            cwd=self.path,
+            cwd=self.root,
             env=self.environment,
             capture_output=True,
             text=True,
@@ -86,7 +87,7 @@ class Repository:
         commands = self.folder / "commands"
         recorded = commands.read_text().splitlines() if commands.exists() else []
         commands.unlink(missing_ok=True)
-        return Run(result.returncode, result.stdout + result.stderr, recorded, self.path)
+        return Run(result.returncode, result.stdout + result.stderr, recorded, self.root)
 
 
 def temporary_repository(test: type[unittest.TestCase]) -> Repository:
@@ -117,11 +118,12 @@ class ExitStatusTest(unittest.TestCase):
 
 
 class CheckTest(unittest.TestCase):
-    """One repository that holds every test's case, checked three times: plainly, with --base and with --all. main has a
-    later commit than the one the branch left from, which holds a loop script without .py that runs python3. The
-    branch's one commit adds a file and deletes another. Besides a staged, a changed and an untracked file and a file
-    deleted only from the folder, the untracked files are a Markdown file that breaks a rule and has a letter outside
-    ASCII in its name, a workflow, Dependabot's settings and a new loop script."""
+    """One repository that holds every test's case, checked three times: plainly, with --base and with --all. main's
+    first commit holds a loop script without .py that runs python3. The branch left from that commit, and main has a
+    later commit that the branch doesn't have. The branch's one commit adds a file and deletes another. Besides a
+    staged, a changed and an untracked file and a file deleted only from the folder, the untracked files are a Markdown
+    file that breaks a rule and has a letter outside ASCII in its name, a workflow, Dependabot's settings and a new loop
+    script."""
 
     @classmethod
     def setUpClass(cls):
@@ -139,13 +141,13 @@ class CheckTest(unittest.TestCase):
         repository.git("update-ref", "refs/remotes/origin/main", "HEAD")
         repository.git("switch", "--quiet", "--create", "branch", "HEAD~1")
         repository.write("committed.txt")
-        (repository.path / "deleted-in-a-commit.txt").unlink()
+        (repository.root / "deleted-in-a-commit.txt").unlink()
         repository.commit("the branch's change")
         repository.write("staged.txt")
         repository.git("add", "staged.txt")
         repository.write("tracked.txt", "changed\n")
         repository.write("untracked.txt")
-        (repository.path / "deleted-in-the-folder.txt").unlink()
+        (repository.root / "deleted-in-the-folder.txt").unlink()
         repository.write("docs/café.md", "It simply works.\n")
         repository.write(".github/workflows/extra.yaml")
         repository.write(".github/dependabot.yml")
