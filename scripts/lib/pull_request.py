@@ -18,8 +18,6 @@ NARRATION = re.compile(
     r"|\b(fix|review) rounds?\b|\bround \d\b",
     re.IGNORECASE,
 )
-# Bold text at the start of a line that stands as a heading: alone on its line, or ending in a colon.
-BOLD_HEADING = re.compile(r"^\s*(\*\*|__)[^*_]+(\1\s*$|:\1|\1:)")
 
 
 def check_title(title: str) -> list[str]:
@@ -57,11 +55,6 @@ def check_body(body: str, is_research: bool) -> list[str]:
             problems.append(
                 f'"{match.group()}" tells how the work went. Describe the final change instead, as if it had '
                 "been made in one go."
-            )
-        if line.kind == "heading" or (line.kind == "prose" and BOLD_HEADING.match(line.text)):
-            problems.append(
-                f"Line {line.number} is a heading, or starts with bold text that stands as one. Write the description "
-                "without them, in sentences and lists."
             )
         if line.kind == "table" and any(len(cell.split()) > MAX_CELL_WORDS for cell in line.text.split("|")):
             problems.append(f"Line {line.number} holds a paragraph in a table cell. Put sentences outside tables.")
