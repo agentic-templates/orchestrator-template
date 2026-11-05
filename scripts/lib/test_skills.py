@@ -71,6 +71,17 @@ class PreloadTest(unittest.TestCase):
         ]
         self.assertEqual(problems, [])
 
+    def test_only_builder_types_preload_building(self):
+        for agent_file in AGENT_FILES:
+            with self.subTest(agent_file=agent_file.name):
+                self.assertEqual(
+                    "building" in preloaded_skills(agent_file.stem),
+                    agent_file.stem.startswith("builder"),
+                    "Every builder type and no other agent type preloads `building`, because the launcher gives a "
+                    f"type that preloads it a branch of its own. Correct the `skills:` of `.claude/agents/"
+                    f"{agent_file.name}`.",
+                )
+
     def test_each_preloaded_skill_exists(self):
         names = skill_names()
         problems = [
