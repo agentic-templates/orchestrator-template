@@ -27,6 +27,15 @@ class CheckTextTest(unittest.TestCase):
         self.assertEqual(messages("a.rs", "// Allowed because the parser needs every case.\n#[allow(clippy::x)]\n"), [])
         self.assertEqual(len(messages("a.ts", "// eslint-" + "disable-next-line no-console\n")), 1)
         self.assertEqual(len(messages("a.py", "x = f()  # t" + "y: ignore[invalid-assignment]\n")), 1)
+        for path, suppression in (
+            ("a.py", "import os  # NO" + "QA: F401"),
+            ("a.py", "# ruff: no" + "qa: F401"),
+            ("a.py", "# flake8: no" + "qa: F401"),
+            ("a.py", "# ruff: dis" + "able[F401]"),
+            ("a.yml", "- uses: actions/checkout@v4 # zizmor:" + " ignore[unpinned-uses]"),
+        ):
+            with self.subTest(suppression=suppression):
+                self.assertEqual(len(messages(path, suppression + "\n")), 1)
 
     def test_docs_and_this_file_may_name_suppressions(self):
         this_file = Path(files.__file__).read_text()
