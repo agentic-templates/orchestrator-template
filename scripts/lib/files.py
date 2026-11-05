@@ -14,7 +14,7 @@ PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|or
 # Spelled in parts, because this rule applies to this file too.
 UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
 # Comments and attributes that make a linter or a type checker skip code, in the common languages.
-# Each must give its reason, starting with "because", on its own line or the line above.
+# Each must give its reason, with the word "because", on its own line or the line above.
 SUPPRESSION = re.compile(
     r"(?i:#\s*((ruff|flake8):\s*)?noqa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
     r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
@@ -37,8 +37,9 @@ def check_text(path: str, text: str) -> list[Problem]:
         for match in EMAIL.finditer(line):
             if not PUBLIC_EMAIL.search(match.group()):
                 problems.append(Problem(number, f"Remove the email address {match.group()}."))
-        if UNFINISHED.search(line):
-            problems.append(Problem(number, "Finish the work or leave it out, and list what's left in your report."))
+        if marker := UNFINISHED.search(line):
+            advice = "Finish the work or leave it out, and list what's left in your report."
+            problems.append(Problem(number, f'"{marker.group()}" marks unfinished work. {advice}'))
     return problems + check_suppressions(path, text) + check_size(path, text)
 
 
@@ -48,7 +49,9 @@ def check_suppressions(path: str, text: str) -> list[Problem]:
         return []
     lines = text.splitlines()
     return [
-        Problem(number, 'Give the reason for skipping the check in the comment, starting with "because".')
+        Problem(
+            number, 'Give the reason for skipping the check, with the word "because", on this line or the one above.'
+        )
         for number, line in enumerate(lines, start=1)
         if SUPPRESSION.search(line)
         and not REASON.search(line)
@@ -59,11 +62,17 @@ def check_suppressions(path: str, text: str) -> list[Problem]:
 def check_size(path: str, text: str) -> list[Problem]:
     parts = PurePosixPath(path).parts
     if parts[:2] == (".agents", "skills") and len(text) > MAX_HOOK_CHARACTERS:
-        return [Problem(1, "This skill is too long to inject in full. Cut it, or split it by when it's needed.")]
+        message = (
+            f"This skill has {len(text):,} characters, and a skill may have at most {MAX_HOOK_CHARACTERS:,}, the most "
+            "a hook can inject. Cut it, or move the rules that only some kinds of work need into a skill of their own."
+        )
+        return [Problem(1, message)]
     if path == "AGENTS.md" and len(text.encode()) > MAX_AGENTS_BYTES:
-        return [
-            Problem(1, "AGENTS.md is too long for Codex to read in full. Move rules into the skills they belong to.")
-        ]
+        message = (
+            f"AGENTS.md has {len(text.encode()):,} bytes, and Codex reads only the first {MAX_AGENTS_BYTES:,}. Move "
+            "rules into the skills they belong to."
+        )
+        return [Problem(1, message)]
     return []
 
 
