@@ -19,7 +19,7 @@ NARRATION = re.compile(
     re.IGNORECASE,
 )
 # Bold text at the start of a line that stands as a heading: alone on its line, or ending in a colon.
-BOLD_HEADING = re.compile(r"^\s*(\*\*|__)[^*_]+(\1:?\s*$|:\1|\1:)")
+BOLD_HEADING = re.compile(r"^\s*(\*\*|__)[^*_]+(\1\s*$|:\1|\1:)")
 
 
 def check_title(title: str) -> list[str]:
