@@ -193,15 +193,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         prog="scripts/check", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--all", action="store_true", help="check every file")
-    parser.add_argument(
-        "--base",
-        metavar="COMMIT",
-        help="check only the files that the commits after this one changed, not uncommitted ones",
-    )
-    parser.add_argument(
-        "--review", action="store_true", help="instead of the checks, list what a reviewer should judge, and exit 0"
-    )
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("--base", metavar="COMMIT")
+    parser.add_argument("--review", action="store_true")
     arguments = parser.parse_args()
     paths = regular_files(git("ls-files") if arguments.all else changed_files(arguments.base))
     if arguments.review:
