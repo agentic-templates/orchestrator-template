@@ -121,14 +121,11 @@ def git(*args: str) -> list[str]:
 
 
 def changed_files(base: str | None) -> list[str]:
-    if base is None:
-        base = git("merge-base", "origin/main", "HEAD")[0]
-        local = git("diff", "--name-only", "--diff-filter=d", "HEAD") + git(
-            "ls-files", "--others", "--exclude-standard"
-        )
-    else:
-        local = []
-    return sorted(set(git("diff", "--name-only", "--diff-filter=d", base, "HEAD") + local))
+    if base is not None:
+        return git("diff", "--name-only", base, "HEAD")
+    # Given one commit, git diff compares it with the working tree, so uncommitted changes count too.
+    base = git("merge-base", "origin/main", "HEAD")[0]
+    return sorted(git("diff", "--name-only", base) + git("ls-files", "--others", "--exclude-standard"))
 
 
 def regular_files(paths: list[str]) -> list[str]:
