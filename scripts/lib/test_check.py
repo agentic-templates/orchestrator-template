@@ -117,17 +117,18 @@ class ExitStatusTest(unittest.TestCase):
 
 
 class CheckTest(unittest.TestCase):
-    """One repository that holds every test's case, checked three times: plainly, with --base and with --all. main has
-    a later commit than the one the branch left from. The branch's one commit adds a file and deletes another. Besides
-    a staged, a changed and an untracked file and a file deleted only from the folder, the untracked files are a
-    Markdown file that breaks a rule and has a letter outside ASCII in its name, a workflow, Dependabot's settings and a
-    new loop script."""
+    """One repository that holds every test's case, checked three times: plainly, with --base and with --all. main has a
+    later commit than the one the branch left from, which holds a loop script without .py that runs python3. The
+    branch's one commit adds a file and deletes another. Besides a staged, a changed and an untracked file and a file
+    deleted only from the folder, the untracked files are a Markdown file that breaks a rule and has a letter outside
+    ASCII in its name, a workflow, Dependabot's settings and a new loop script."""
 
     @classmethod
     def setUpClass(cls):
         repository = temporary_repository(cls)
         repository.write("tracked.txt")
         repository.write("shared.txt")
+        repository.write("scripts/tool", "#!/usr/bin/env python3\nTOTAL = 1\n")
         # Text of their own, so that git doesn't take a deleted file and an added one for a renamed file, which git diff
         # --name-only gives by its new name only.
         for path in DELETED_FILES:
@@ -198,7 +199,8 @@ class CheckTest(unittest.TestCase):
     def test_type_checks_every_loop_script_changed_or_not(self):
         [ty_files] = self.plain.files_given_to("ty@")
         self.assertCountEqual(
-            ty_files, ["scripts/check", "scripts/lib/files.py", "scripts/lib/new.py", "scripts/lib/prose.py"]
+            ty_files,
+            ["scripts/check", "scripts/lib/files.py", "scripts/lib/new.py", "scripts/lib/prose.py", "scripts/tool"],
         )
 
     def test_runs_the_loop_tests_without_the_current_folder_on_the_import_path(self):
