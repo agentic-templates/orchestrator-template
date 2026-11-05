@@ -52,7 +52,8 @@ def check_body(body: str, is_research: bool) -> list[str]:
             )
         if line.kind == "heading" or (line.kind == "prose" and BOLD_LINE.match(line.text)):
             problems.append(
-                f"Line {line.number} is a heading. Write the description without headings, in sentences and lists."
+                f"Line {line.number} is a heading, or a line of bold text that stands as one. Write the description "
+                "without them, in sentences and lists."
             )
         if line.kind == "table" and any(len(cell.split()) > MAX_CELL_WORDS for cell in line.text.split("|")):
             problems.append(f"Line {line.number} holds a paragraph in a table cell. Put sentences outside tables.")

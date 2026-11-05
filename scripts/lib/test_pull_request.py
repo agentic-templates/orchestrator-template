@@ -46,10 +46,13 @@ class BodyTest(unittest.TestCase):
 
     def test_rejects_headings_and_lines_of_bold_text(self):
         body = BODY + "\n## Why\n\n**What changed:**\n\n__Tests__\n"
-        heading = "is a heading. Write the description without headings, in sentences and lists."
+        after_the_line_number = (
+            "is a heading, or a line of bold text that stands as one. Write the description without them, "
+            "in sentences and lists."
+        )
         self.assertEqual(
             pull_request.check_body(body, is_research=False),
-            [f"Line 5 {heading}", f"Line 7 {heading}", f"Line 9 {heading}"],
+            [f"Line {number} {after_the_line_number}" for number in (5, 7, 9)],
         )
 
     def test_accepts_bold_words_inside_a_sentence(self):
