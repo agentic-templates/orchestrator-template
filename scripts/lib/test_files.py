@@ -16,6 +16,7 @@ class CheckTextTest(unittest.TestCase):
 
     def test_accepts_public_addresses(self):
         self.assertEqual(messages("a.md", "Mail 1+alex@users.noreply.github.com or bot@example.com.\n"), [])
+        self.assertEqual(messages("a.md", "Run `git clone git@github.com:owner/repo.git`.\n"), [])
 
     def test_finds_unfinished_work(self):
         self.assertEqual(len(messages("a.py", "x = 1  # TO" + "DO: round the total\n")), 1)

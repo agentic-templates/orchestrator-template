@@ -7,7 +7,8 @@ from prose import Problem
 
 HOME_PATH = re.compile(r"(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]+")
 EMAIL = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
-PUBLIC_EMAIL = re.compile(r"@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
+# A clone address over SSH, such as git@github.com, has the form of an email address.
+PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
 # Spelled in two parts, so that this file doesn't break its own rule.
 UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
 # Comments and attributes that make a linter or a type checker skip code, in the common languages.
