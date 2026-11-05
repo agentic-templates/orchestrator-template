@@ -15,6 +15,12 @@ class TitleTest(unittest.TestCase):
         self.assertEqual(len(pull_request.check_title("feature: skip duplicate expenses")), 1)
 
 
+class ClosedIssuesTest(unittest.TestCase):
+    def test_fixes_and_resolves_close_an_issue_as_closes_does(self):
+        for line in ("Closes #5", "Fixes #5", "Resolves #5"):
+            self.assertEqual(pull_request.closed_issues(line), [5], line)
+
+
 class BodyTest(unittest.TestCase):
     def test_accepts_a_short_description(self):
         self.assertEqual(pull_request.check_body(BODY, is_research=False), [])

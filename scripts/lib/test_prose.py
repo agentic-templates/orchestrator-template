@@ -34,6 +34,9 @@ class CheckTest(unittest.TestCase):
     def test_ends_front_matter_only_at_a_line_of_three_dashes(self):
         self.assertEqual(messages("---\nname: x\n----\nsimply; here\n---\nIt works.\n"), [])
 
+    def test_leaves_out_an_html_comment_and_keeps_the_line_numbers(self):
+        self.assertEqual(prose.check("<!-- note\nsimply -->\nIt simply works.\n"), [prose.Problem(3, 'Cut "simply".')])
+
     def test_finds_vague_link_text(self):
         self.assertEqual(messages("See [here](https://example.com).\n"), ["Make the link text name the page it opens."])
 
