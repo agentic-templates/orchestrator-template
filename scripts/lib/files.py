@@ -22,11 +22,14 @@ SUPPRESSION = re.compile(
     r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
     r"|@ts-(ignore|expect-error|nocheck)|biome-ignore|//\s*nolint|#!?\[allow\(|@SuppressWarnings"
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore|#\s*shellcheck\s.*\bdisable="
-    r"|^\s*@(unittest\.)?skip(If|Unless)?\b|\.skipTest\(|\bpytest\.(mark\.skip(if)?\b|skip\()"
+    r"|^\s*@((unittest\.)?skip(If|Unless)?|Disabled\w*|Ignore)\b|\.skipTest\(|\bSkipTest\("
+    r"|\bpytest\.(mark\.skip(if)?\b|importorskip\(|skip\()"
     # A JavaScript test marker counts only before .each, a test name in quotes or the end of the line, because a
-    # Rust iterator named it has a skip that takes a number.
-    r"|(?<![\w.$])(x(it|test|describe)|(it|test|describe)\.skip)(\.each\b|\(\s*([\"'`]|$))"
-    r"|(?<![\w.])[tb]\.Skip(f|Now)?\(|#\[ignore\b"
+    # Rust iterator named it has a skip that takes a number. Playwright's test.skip and test.fixme count before any
+    # argument, because inside a test they take a condition.
+    r"|(?<![\w.$])((x(it|test|describe)|(it|test|describe)\.skip)(\.each\b|\(\s*([\"'`]|$))"
+    r"|(it|test|describe)\.skipIf\(|test\.(skip|fixme)\(|this\.skip\(\))"
+    r"|((?<![\w.])[tb]|\bT\(\))\.Skip(f|Now)?\(|#\[ignore\b|\bXCTSkip(If|Unless)?\(|\[\w+\(\s*Skip\s*="
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
 # Claude Code cuts the context that a hook injects at 10,000 characters.
