@@ -44,11 +44,10 @@ def check_body(body: str, is_research: bool) -> list[str]:
             f"The description closes several issues, with one line for each: {numbers}. Keep only the line for the "
             "issue the pull request builds."
         )
-    words = prose_words(body)
-    if not is_research and words > MAX_PROSE_WORDS:
+    if not is_research and prose_words(body) > MAX_PROSE_WORDS:
         problems.append(
-            f"The description has {words} words outside tables and code, and the limit is {MAX_PROSE_WORDS}. Cut the "
-            "sentences that describe how the code works, repeat the issue or tell the history of the branch."
+            "The description is longer than a later reader will take in. Cut the sentences that describe "
+            "how the code works, repeat the issue or tell the history of the branch."
         )
     path_lines = [line for line in body.splitlines() if PATH_ITEM.match(line)]
     if len(path_lines) > MAX_PATH_LINES:
@@ -65,8 +64,5 @@ def check_body(body: str, is_research: bool) -> list[str]:
                 "without them, in sentences and lists."
             )
         if line.kind == "table" and any(len(cell.split()) > MAX_CELL_WORDS for cell in line.text.split("|")):
-            problems.append(
-                f"Line {line.number} has a table cell of more than {MAX_CELL_WORDS} words. Move the long text out of "
-                "the table."
-            )
+            problems.append(f"Line {line.number} holds a paragraph in a table cell. Put sentences outside tables.")
     return problems

@@ -74,10 +74,9 @@ TOOLS = [
     Tool(
         "loop-python",
         complexipy(MAX_COMPLEXITY),
-        f"These functions have a cognitive complexity over {MAX_COMPLEXITY}. Change a function only where the change"
-        " makes it easier to read. If every change you can find would make the function harder to read, leave the"
-        " function as it is, and end its `def` line with `# complexipy: ignore because <why the function reads best as"
-        " it is>`.",
+        "These functions are over the cognitive-complexity limit. Change a function only where the change makes it"
+        " easier to read. If every change you can find would make the function harder to read, leave the function as"
+        " it is, and end its `def` line with `# complexipy: ignore because <why the function reads best as it is>`.",
     ),
     Tool("workflow", ["uvx", "--from", "actionlint-py@1.7.12.25", "actionlint"]),
     Tool("workflow", ZIZMOR),
