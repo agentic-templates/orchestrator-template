@@ -29,7 +29,7 @@ SUPPRESSION = re.compile(
     # argument, because inside a test they take a condition.
     r"|(?<![\w.$])((x(it|test|describe)|(it|test|describe)\.skip)(\.each\b|\(\s*([\"'`]|$))"
     r"|(it|test|describe)\.skipIf\(|test\.(skip|fixme)\(|this\.skip\(\))"
-    r"|((?<![\w.])[tb]|\bT\(\))\.Skip(f|Now)?\(|#\[ignore\b|\bXCTSkip(If|Unless)?\(|\[\w+\(\s*Skip\s*="
+    r"|((?<![\w.])[tb]|\bT\(\))\.Skip(f|Now)?\(|#\[ignore\b|\bXCTSkip(If|Unless)?\(|\[\w+\([^\]]*\bSkip\s*="
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
 # Claude Code cuts the context that a hook injects at 10,000 characters.

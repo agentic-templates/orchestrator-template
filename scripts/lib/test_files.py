@@ -99,6 +99,7 @@ class CheckTextTest(unittest.TestCase):
             ("ATests.swift", "        try XCTSk" + 'ipIf(isSimulator, "needs a device")'),
             ("ATests.swift", "        try XCTSk" + 'ipUnless(hasNetwork, "needs a network")'),
             ("ATests.cs", "    [Fact(Sk" + 'ip = "needs a network")]'),
+            ("ATests.cs", '    [Fact(DisplayName = "adds the totals", Sk' + 'ip = "needs a network")]'),
             ("a.rs", "#[ign" + "ore]"),
             ("a.rs", "#[ign" + 'ore = "needs a network"]'),
         ):
