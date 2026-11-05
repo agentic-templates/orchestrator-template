@@ -44,19 +44,19 @@ class BodyTest(unittest.TestCase):
         cell = " ".join(["word"] * 50)
         self.assertEqual(len(pull_request.check_body(f"{BODY}\n| a | {cell} |\n", is_research=False)), 1)
 
-    def test_rejects_headings_and_lines_of_bold_text(self):
-        body = BODY + "\n## Why\n\n**What changed:**\n\n__Tests__\n"
+    def test_rejects_headings_and_bold_text_that_stands_as_one(self):
+        body = BODY + "\n## Why\n\n**What changed:**\n\n__Tests__\n\n**Why**: the import doubled them.\n"
         after_the_line_number = (
-            "is a heading, or a line of bold text that stands as one. Write the description without them, "
+            "is a heading, or starts with bold text that stands as one. Write the description without them, "
             "in sentences and lists."
         )
         self.assertEqual(
             pull_request.check_body(body, is_research=False),
-            [f"Line {number} {after_the_line_number}" for number in (5, 7, 9)],
+            [f"Line {number} {after_the_line_number}" for number in (5, 7, 9, 11)],
         )
 
-    def test_accepts_bold_words_inside_a_sentence(self):
-        sentences = "The import **skips** expenses it has.\n- **Dates** stay as they were.\n**Both** imports agree.\n"
+    def test_accepts_sentences_with_bold_words_or_an_issue_number_first(self):
+        sentences = "The import **skips** expenses it has.\n- **Dates** stay as they were.\n**Both** imports agree.\n#12 asked for it.\n"
         self.assertEqual(pull_request.check_body(BODY + sentences, is_research=False), [])
 
 
