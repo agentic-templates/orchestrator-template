@@ -22,8 +22,10 @@ SUPPRESSION = re.compile(
     r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
-# A hook can inject at most 10,000 characters, and Codex reads at most 32 KiB of AGENTS.md.
-MAX_SKILL_CHARACTERS = 10_000
+# Claude Code cuts a hook's output at 10,000 characters. The session-start hook cuts what it injects to fit, and no
+# skill may be longer. test_skills.py checks that the orchestrator's skills fit together.
+MAX_HOOK_CHARACTERS = 10_000
+# Codex reads at most 32 KiB of AGENTS.md.
 MAX_AGENTS_BYTES = 32 * 1024
 
 
@@ -56,7 +58,7 @@ def check_suppressions(path: str, text: str) -> list[Problem]:
 
 def check_size(path: str, text: str) -> list[Problem]:
     parts = PurePosixPath(path).parts
-    if parts[:2] == (".agents", "skills") and len(text) > MAX_SKILL_CHARACTERS:
+    if parts[:2] == (".agents", "skills") and len(text) > MAX_HOOK_CHARACTERS:
         return [Problem(1, "This skill is too long to inject in full. Cut it, or split it by when it's needed.")]
     if path == "AGENTS.md" and len(text.encode()) > MAX_AGENTS_BYTES:
         return [

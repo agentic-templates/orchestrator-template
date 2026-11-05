@@ -3,6 +3,7 @@ import re
 import unittest
 from pathlib import Path
 
+import files
 import launching
 import usage
 from temporary_loop import TemporaryLoopTest
@@ -116,7 +117,6 @@ class PreloadTest(unittest.TestCase):
 
 class OrchestratorSkillsTest(TemporaryLoopTest):
     def test_the_session_start_hook_gives_the_orchestrator_its_skills_whole(self):
-        limit = self.load_script("hooks/session-start")["MAX_CHARACTERS"]
         for provider in providers():
             with self.subTest(provider=provider):
                 # Without LOOP_ORCHESTRATE, the hook puts a note before the skills, so the context is at its longest.
@@ -126,7 +126,8 @@ class OrchestratorSkillsTest(TemporaryLoopTest):
                 self.assertTrue(
                     context.endswith(last_skill),
                     f"The session-start hook cuts the end of `orchestrator-{provider}`, because a hook can inject at "
-                    f"most {limit:,} characters. Shorten `orchestrator` or `orchestrator-{provider}`.",
+                    f"most {files.MAX_HOOK_CHARACTERS:,} characters. Shorten `orchestrator` or "
+                    f"`orchestrator-{provider}`.",
                 )
 
 
