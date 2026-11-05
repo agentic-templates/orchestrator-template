@@ -3,8 +3,9 @@
 # requires-python = ">=3.12"
 # ///
 """Runs the formatters and linters on the files that the branch changes, or on every file with --all, and the tests and
-type checkers on the whole project. The exit status is 1 when any of them fails, or when a file it checks breaks one
-of the repository's own rules, such as a private path, which it prints as "<file>:<line>: <what to do>".
+type checkers on the whole project. It exits with status 1 when any of them fails, or when a file it checks breaks one
+of the repository's own rules, such as the rule against private paths. It prints each break of those rules as
+"<file>:<line>: <what to do>".
 
 Without --base, it checks the files that the branch's commits changed since the last commit the branch shares with
 origin/main, and the files with uncommitted changes, untracked files included. With --base, it checks only the files
