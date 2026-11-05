@@ -1,9 +1,11 @@
+import json
 import re
 import unittest
 from pathlib import Path
 
 import launching
 import usage
+from temporary_loop import TemporaryLoopTest
 
 # The launcher reads agent files from main, but a branch's own agent files and skills are in the checkout that holds
 # this test.
@@ -16,6 +18,11 @@ def skill_names() -> list[str]:
     return sorted(path.name for path in SKILLS.iterdir() if (path / "SKILL.md").is_file())
 
 
+def providers() -> list[str]:
+    """The providers that have an orchestrator skill of their own, such as "claude"."""
+    return [name.removeprefix("orchestrator-") for name in skill_names() if name.startswith("orchestrator-")]
+
+
 def preloaded_skills(agent_type: str) -> list[str]:
     """The skills in an agent's context from its first turn: its type's `skills:`, and for the orchestrator also the
     skills that the session-start hook adds. The test can't know which provider runs, so it adds them for every
@@ -23,8 +30,7 @@ def preloaded_skills(agent_type: str) -> list[str]:
     definition = (CHECKOUT / ".claude" / "agents" / f"{agent_type}.md").read_text()
     skills = usage.preloaded_skills(usage.definition_fields(definition))
     if agent_type == "orchestrator":
-        providers = [name.removeprefix("orchestrator-") for name in skill_names() if name.startswith("orchestrator-")]
-        skills += [skill for provider in providers for skill in usage.orchestrator_skills(provider)]
+        skills += [skill for provider in providers() for skill in usage.orchestrator_skills(provider)]
     return list(dict.fromkeys(skills))
 
 
@@ -106,6 +112,22 @@ class PreloadTest(unittest.TestCase):
             if skill not in preloaded and skill not in listed
         ]
         self.assertEqual(problems, [])
+
+
+class OrchestratorSkillsTest(TemporaryLoopTest):
+    def test_the_session_start_hook_gives_the_orchestrator_its_skills_whole(self):
+        limit = self.load_script("hooks/session-start")["MAX_CHARACTERS"]
+        for provider in providers():
+            with self.subTest(provider=provider):
+                # Without LOOP_ORCHESTRATE, the hook puts a note before the skills, so the context is at its longest.
+                output = self.run_script("hooks/session-start", "skills", provider, stdin="{}")[1]
+                context = json.loads(output)["hookSpecificOutput"]["additionalContext"]
+                last_skill = usage.without_front_matter((SKILLS / f"orchestrator-{provider}" / "SKILL.md").read_text())
+                self.assertTrue(
+                    context.endswith(last_skill),
+                    f"The session-start hook cuts the end of `orchestrator-{provider}`, because a hook can inject at "
+                    f"most {limit:,} characters. Shorten `orchestrator` or `orchestrator-{provider}`.",
+                )
 
 
 if __name__ == "__main__":
