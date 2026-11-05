@@ -120,7 +120,8 @@ class CheckTest(unittest.TestCase):
     """One repository that holds every test's case, checked three times: plainly, with --base and with --all. main has
     a later commit than the one the branch left from. The branch's one commit adds a file and deletes another. Besides
     a staged, a changed and an untracked file and a file deleted only from the folder, the untracked files are a
-    Markdown file that breaks a rule, a workflow, Dependabot's settings and a new loop script."""
+    Markdown file that breaks a rule and has a letter outside ASCII in its name, a workflow, Dependabot's settings and a
+    new loop script."""
 
     @classmethod
     def setUpClass(cls):
@@ -176,17 +177,12 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(self.plain.status, 1)
         self.assertIn('docs/café.md:1: Cut "simply".', self.plain.output)
 
-    def test_checks_a_file_whose_name_has_a_letter_outside_ascii(self):
-        self.assertIn('docs/café.md:1: Cut "simply".', self.plain.output)
-
     def test_checks_a_workflow_named_yaml_as_a_workflow(self):
         self.assertEqual(self.plain.files_given_to("actionlint"), [[".github/workflows/extra.yaml"]])
         self.assertIn([".github/workflows/extra.yaml"], self.plain.files_given_to("zizmor@"))
 
     def test_audits_dependabots_settings_for_security(self):
         self.assertIn([".github/dependabot.yml"], self.plain.files_given_to("zizmor@"))
-        [actionlint_files] = self.plain.files_given_to("actionlint")
-        self.assertNotIn(".github/dependabot.yml", actionlint_files)
 
     def test_leaves_out_deleted_files_without_crashing(self):
         # files_given_to leaves out paths that aren't files, so this reads the commands themselves.
@@ -204,10 +200,6 @@ class CheckTest(unittest.TestCase):
         self.assertCountEqual(
             ty_files, ["scripts/check", "scripts/lib/files.py", "scripts/lib/new.py", "scripts/lib/prose.py"]
         )
-
-    def test_type_checks_a_new_loop_script_before_it_is_committed(self):
-        [ty_files] = self.plain.files_given_to("ty@")
-        self.assertIn("scripts/lib/new.py", ty_files)
 
     def test_runs_the_loop_tests_without_the_current_folder_on_the_import_path(self):
         tests = next(command for command in self.plain.commands if command.startswith("uv run"))
