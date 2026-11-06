@@ -21,7 +21,7 @@ The aim is text that a reader understands the first time they read it.
 - Use one term for one thing, everywhere.
 - Don't use metaphors or marketing words such as "seamless", "powerful" or "blazing fast".
 - Cut filler such as "simply", "just", "basically" and "note that".
-- Replace a vague judgment with the fact behind it. Write "imports 10,000 expenses in 2 seconds", not "fast".
+- Replace a vague judgment with the fact behind it. Write "imports 10,000 expenses in 2 seconds", not "fast". Don't give an agent a threshold or a limit that the project chose, though, because it tends to treat the number as a target.
 
 For example, in a README for people who use an expense tracker:
 

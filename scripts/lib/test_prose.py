@@ -43,6 +43,9 @@ class ProseWordsTest(unittest.TestCase):
         text = "# A heading\n\nOne two three.\n\n- four five\n\n| six | seven |\n\n```\neight nine\n```\n"
         self.assertEqual(prose.prose_words(text), 5)
 
+    def test_counts_the_words_of_a_line_that_starts_with_an_issue_number(self):
+        self.assertEqual(prose.prose_words("#91 asked for it.\n"), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

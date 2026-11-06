@@ -39,6 +39,7 @@ URL = re.compile(r"https?://\S+")
 HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 QUOTED = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d')
 LIST_MARKER = re.compile(r"^\s*([-*+]|\d+\.)\s+")
+HEADING = re.compile(r"^#{1,6}(\s|$)")
 
 
 def lines(text: str) -> list[Line]:
@@ -69,7 +70,7 @@ def classify(number: int, raw: str) -> Line:
     stripped = raw.strip()
     if stripped.startswith("|"):
         return Line(number, cleaned, "table")
-    if stripped.startswith("#"):
+    if HEADING.match(stripped):
         return Line(number, cleaned, "heading")
     if LIST_MARKER.match(raw):
         return Line(number, LIST_MARKER.sub("", cleaned), "list")
