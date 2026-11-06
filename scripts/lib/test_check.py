@@ -42,6 +42,8 @@ class Repository:
         shutil.copy(SCRIPTS / "check", self.root / "scripts")
         for module in ("files.py", "prose.py"):
             shutil.copy(SCRIPTS / "lib" / module, self.root / "scripts" / "lib")
+        # scripts/check's imports leave bytecode beside them, which the real repository ignores too.
+        (self.root / ".gitignore").write_text("__pycache__/\n")
         self.environment = os.environ.copy()
         # The tests of scripts/check run inside scripts/check, which sets PYTHONSAFEPATH for them.
         self.environment.pop("PYTHONSAFEPATH", None)
