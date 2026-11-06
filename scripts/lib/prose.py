@@ -26,7 +26,8 @@ WORD_ADVICE = {
     "seamlessly": 'Replace "seamlessly" with the fact behind it.',
     "powerful": 'Replace "powerful" with the fact behind it.',
     "blazing": 'Replace "blazing" with a measured number.',
-    "handles": 'Replace "handles" with the actual action.',
+    "handles": 'Replace "handles" with the actual action. If it\'s the noun, as in "file handles", use another word, '
+    "because the check can't tell the noun from the verb.",
     "deals with": 'Replace "deals with" with the actual action.',
     "manages": 'Replace "manages" with the actual action.',
 }
@@ -85,7 +86,11 @@ def check(text: str) -> list[Problem]:
     ]
     for line in lines(text):
         if ";" in line.text and line.kind != "table":
-            problems.append(Problem(line.number, "Write two sentences instead of joining them with a semicolon."))
+            advice = (
+                "Write two sentences instead of joining them with a semicolon. In a title or a heading, which holds "
+                'one sentence, link the two parts with a word such as "and", or keep only one of them.'
+            )
+            problems.append(Problem(line.number, advice))
         if JOINING_DASH.search(line.text):
             problems.append(
                 Problem(line.number, "Write two sentences, or use a comma, instead of joining with a dash.")

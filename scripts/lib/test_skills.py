@@ -1,9 +1,14 @@
+import json
 import re
+import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import files
 import launching
 import usage
+from temporary_loop import TemporaryLoopTest
 
 # The launcher reads agent files from main, but a branch's own agent files and skills are in the checkout that holds
 # this test.
@@ -16,6 +21,11 @@ def skill_names() -> list[str]:
     return sorted(path.name for path in SKILLS.iterdir() if (path / "SKILL.md").is_file())
 
 
+def providers() -> list[str]:
+    """The providers that have an orchestrator skill of their own, such as "claude"."""
+    return [name.removeprefix("orchestrator-") for name in skill_names() if name.startswith("orchestrator-")]
+
+
 def preloaded_skills(agent_type: str) -> list[str]:
     """The skills in an agent's context from its first turn: its type's `skills:`, and for the orchestrator also the
     skills that the session-start hook adds. The test can't know which provider runs, so it adds them for every
@@ -23,8 +33,7 @@ def preloaded_skills(agent_type: str) -> list[str]:
     definition = (CHECKOUT / ".claude" / "agents" / f"{agent_type}.md").read_text()
     skills = usage.preloaded_skills(usage.definition_fields(definition))
     if agent_type == "orchestrator":
-        providers = [name.removeprefix("orchestrator-") for name in skill_names() if name.startswith("orchestrator-")]
-        skills += [skill for provider in providers for skill in usage.orchestrator_skills(provider)]
+        skills += [skill for provider in providers() for skill in usage.orchestrator_skills(provider)]
     return list(dict.fromkeys(skills))
 
 
@@ -71,6 +80,24 @@ class PreloadTest(unittest.TestCase):
         ]
         self.assertEqual(problems, [])
 
+    def test_only_builder_types_preload_building(self):
+        problems = []
+        for agent_file in AGENT_FILES:
+            is_builder = agent_file.stem.startswith("builder")
+            preloads_building = "building" in preloaded_skills(agent_file.stem)
+            if preloads_building and not is_builder:
+                problems.append(
+                    f"`.claude/agents/{agent_file.name}` preloads `building`, but its name doesn't start with "
+                    "`builder`, so it isn't a builder type. The launcher gives every type that preloads `building` a "
+                    "branch of its own. Remove `building` from its `skills:`."
+                )
+            if is_builder and not preloads_building:
+                problems.append(
+                    f"`.claude/agents/{agent_file.name}` is a builder type, but it doesn't preload `building`, so the "
+                    "launcher doesn't give it a branch of its own. Add `building` to its `skills:`."
+                )
+        self.assertEqual(problems, [])
+
     def test_each_preloaded_skill_exists(self):
         names = skill_names()
         problems = [
@@ -95,6 +122,27 @@ class PreloadTest(unittest.TestCase):
             if skill not in preloaded and skill not in listed
         ]
         self.assertEqual(problems, [])
+
+
+class OrchestratorSkillsTest(TemporaryLoopTest):
+    def test_the_session_start_hook_gives_the_orchestrator_its_skills_whole(self):
+        for provider in providers():
+            with self.subTest(provider=provider):
+                # Without LOOP_ORCHESTRATE, the hook puts a note before the skills, so the context is at its longest.
+                output = self.run_script("hooks/session-start", "skills", provider, stdin="{}")[1]
+                context = json.loads(output)["hookSpecificOutput"]["additionalContext"]
+                last_skill = usage.without_front_matter((SKILLS / f"orchestrator-{provider}" / "SKILL.md").read_text())
+                if context.endswith(last_skill):
+                    continue
+                with mock.patch.object(files, "MAX_HOOK_CHARACTERS", sys.maxsize):
+                    output = self.run_script("hooks/session-start", "skills", provider, stdin="{}")[1]
+                uncut = json.loads(output)["hookSpecificOutput"]["additionalContext"]
+                self.fail(
+                    f"The context that the session-start hook injects has {len(uncut):,} characters, and a hook can "
+                    f"inject at most {files.MAX_HOOK_CHARACTERS:,}, so the hook cuts the end of "
+                    f"`orchestrator-{provider}`. The note that the hook puts before the skills counts toward the "
+                    f"limit. Shorten `orchestrator` or `orchestrator-{provider}`."
+                )
 
 
 if __name__ == "__main__":

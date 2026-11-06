@@ -6,20 +6,30 @@ from pathlib import PurePosixPath
 from prose import Problem
 
 HOME_PATH = re.compile(r"(/Users/|/home/|C:\\Users\\)[A-Za-z0-9._-]+")
-EMAIL = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b")
-PUBLIC_EMAIL = re.compile(r"@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
-# Spelled in two parts, so that this file doesn't break its own rule.
+# An address may start at any character of a run of the characters it may hold. Without the second alternative, the
+# search starts again at each character of a long run without an address, such as a hash in a lock file. That takes
+# 1.03 CPU seconds on a run of 20,000 characters and 4.15 on one of 40,000. The second alternative takes in such a run
+# whole, so the search moves past it.
+EMAIL_OR_RUN = re.compile(r"[\w.+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b|[\w.+-]+")
+# A clone address over SSH, such as git@github.com, has the form of an email address.
+PUBLIC_EMAIL = re.compile(r"^git@|@(users\.noreply\.github\.com|example\.(com|org|net))$", re.IGNORECASE)
+# Spelled in parts, because this rule applies to this file too.
 UNFINISHED = re.compile(r"\b(TO" + r"DO|FIX" + r"ME|XX" + r"X)\b")
-# Comments and attributes that make a linter or a type checker skip code, in the common languages.
-# Each must give its reason, starting with "because", on its own line or the line above.
+# Comments and attributes that make a linter or a type checker skip code, in the common languages, and the decorators,
+# calls and exceptions that skip a test in Python. Each must give its reason, with the word "because", on the same line
+# or the line above.
 SUPPRESSION = re.compile(
-    r"#\s*no" + r"qa\b|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
+    r"(?i:#\s*((ruff|flake8):\s*)?noqa\b)|#\s*ruff:\s*disable|#\s*zizmor:\s*ignore"
+    r"|#\s*type:\s*ignore|#\s*ty:\s*ignore|#\s*pyright:\s*ignore|#\s*pylint:\s*disable|eslint-disable"
     r"|@ts-(ignore|expect-error|nocheck)|biome-ignore|//\s*nolint|#!?\[allow\(|@SuppressWarnings"
-    r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore"
+    r"|rubocop:disable|swiftlint:disable|NOLINT|#\s*complexipy:\s*ignore|#\s*shellcheck\s.*\bdisable="
+    r"|^\s*@(unittest\.)?skip(If|Unless)?\b|\.skipTest\(|\bSkipTest\("
+    r"|\bpytest\.(mark\.skip(if)?\b|importorskip\(|skip\()"
 )
 REASON = re.compile(r"\bbecause\b", re.IGNORECASE)
-# A hook can inject at most 10,000 characters, and Codex reads at most 32 KiB of AGENTS.md.
-MAX_SKILL_CHARACTERS = 10_000
+# Claude Code cuts the context that a hook injects at 10,000 characters.
+MAX_HOOK_CHARACTERS = 10_000
+# Codex reads at most 32 KiB of AGENTS.md.
 MAX_AGENTS_BYTES = 32 * 1024
 
 
@@ -28,12 +38,17 @@ def check_text(path: str, text: str) -> list[Problem]:
     for number, line in enumerate(text.splitlines(), start=1):
         if HOME_PATH.search(line):
             problems.append(Problem(number, "Remove the local path. Paths in a home folder are private."))
-        for match in EMAIL.finditer(line):
-            if not PUBLIC_EMAIL.search(match.group()):
-                problems.append(Problem(number, f"Remove the email address {match.group()}."))
-        if UNFINISHED.search(line):
-            problems.append(Problem(number, "Finish the work or leave it out, and list what's left in your report."))
+        for address in email_addresses(line):
+            if not PUBLIC_EMAIL.search(address):
+                problems.append(Problem(number, f"Remove the email address {address}."))
+        if marker := UNFINISHED.search(line):
+            advice = "Finish the work or leave it out, and list what's left in your report."
+            problems.append(Problem(number, f'"{marker.group()}" marks unfinished work. {advice}'))
     return problems + check_suppressions(path, text) + check_size(path, text)
+
+
+def email_addresses(line: str) -> list[str]:
+    return [match.group() for match in EMAIL_OR_RUN.finditer(line) if "@" in match.group()]
 
 
 def check_suppressions(path: str, text: str) -> list[Problem]:
@@ -41,23 +56,35 @@ def check_suppressions(path: str, text: str) -> list[Problem]:
     if path.endswith(".md") or path == "scripts/lib/files.py":
         return []
     lines = text.splitlines()
-    return [
-        Problem(number, 'Give the reason for skipping the check in the comment, starting with "because".')
-        for number, line in enumerate(lines, start=1)
-        if SUPPRESSION.search(line)
-        and not REASON.search(line)
-        and not (number > 1 and REASON.search(lines[number - 2]))
-    ]
+    problems = []
+    for number, line in enumerate(lines, start=1):
+        match = SUPPRESSION.search(line)
+        if match and not REASON.search(line) and not (number > 1 and REASON.search(lines[number - 2])):
+            form = match.group().strip()
+            problems.append(
+                Problem(
+                    number,
+                    f'"{form}" skips a check or a test. Give the reason, with the word "because", on this line or '
+                    "the one above.",
+                )
+            )
+    return problems
 
 
 def check_size(path: str, text: str) -> list[Problem]:
     parts = PurePosixPath(path).parts
-    if parts[:2] == (".agents", "skills") and len(text) > MAX_SKILL_CHARACTERS:
-        return [Problem(1, "This skill is too long to inject in full. Cut it, or split it by when it's needed.")]
+    if parts[:2] == (".agents", "skills") and len(text) > MAX_HOOK_CHARACTERS:
+        message = (
+            f"This skill has {len(text):,} characters, and a skill may have at most {MAX_HOOK_CHARACTERS:,}, the most "
+            "a hook can inject. Cut it, or move the rules that only some kinds of work need into a skill of their own."
+        )
+        return [Problem(1, message)]
     if path == "AGENTS.md" and len(text.encode()) > MAX_AGENTS_BYTES:
-        return [
-            Problem(1, "AGENTS.md is too long for Codex to read in full. Move rules into the skills they belong to.")
-        ]
+        message = (
+            f"AGENTS.md has {len(text.encode()):,} bytes, and Codex reads only the first {MAX_AGENTS_BYTES:,}. Move "
+            "rules into the skills they belong to."
+        )
+        return [Problem(1, message)]
     return []
 
 

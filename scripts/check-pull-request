@@ -6,8 +6,8 @@
 
 usage: TITLE=<title> [BODY=<description>] scripts/check-pull-request
 
-Without BODY, it checks only the title. It reads the labels of the issue that the description closes with `gh`. It prints each problem as an error
-for GitHub Actions, and its exit status is 1 when there is one.
+Without BODY, it checks only the title. It runs `gh` to read the labels of the issue that the description closes. It
+prints each problem as an error for GitHub Actions, and its exit status is 1 when there is one.
 """
 
 import json
@@ -23,7 +23,7 @@ import pull_request
 
 def is_research(issue: int) -> bool:
     output = subprocess.run(
-        ["gh", "issue", "view", str(issue), "--json", "labels"], check=True, capture_output=True, text=True
+        ["gh", "issue", "view", str(issue), "--json", "labels"], check=True, stdout=subprocess.PIPE, text=True
     ).stdout
     return any(label["name"] == "research" for label in json.loads(output)["labels"])
 
@@ -31,7 +31,7 @@ def is_research(issue: int) -> bool:
 def main() -> int:
     title = os.environ.get("TITLE", "")
     body = os.environ.get("BODY")
-    problems = pull_request.check_title(title) + [problem.message for problem in prose.check(title)]
+    problems = pull_request.check_title(title) + [f"Title: {problem.message}" for problem in prose.check(title)]
     if body is not None:
         issues = pull_request.closed_issues(body)
         problems += pull_request.check_body(body, is_research=len(issues) == 1 and is_research(issues[0]))

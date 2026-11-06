@@ -14,13 +14,6 @@ import usage
 
 
 class AgentSkillsTest(unittest.TestCase):
-    def test_reads_the_skills_an_agent_type_preloads(self):
-        agents = Path(__file__).resolve().parents[2] / ".claude" / "agents"
-        builder_small = usage.definition_fields((agents / "builder-small.md").read_text())
-        reviewer = usage.definition_fields((agents / "reviewer.md").read_text())
-        self.assertIn("building", usage.preloaded_skills(builder_small))
-        self.assertNotIn("building", usage.preloaded_skills(reviewer))
-
     def test_reads_skills_written_as_lines(self):
         fields = usage.definition_fields("---\nname: builder-x\nskills:\n  - building\n  - code\nmodel: opus\n---\n")
         self.assertEqual(usage.preloaded_skills(fields), ["building", "code"])

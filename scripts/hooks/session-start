@@ -22,10 +22,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts" / "lib"))
+import files
 import refreshing
 import usage
 
-MAX_CHARACTERS = 10_000
 # scripts/orchestrate sets LOOP_ORCHESTRATE. Without it, the session runs outside tmux or inside the sandbox.
 NOT_ORCHESTRATED = (
     "This orchestrator wasn't started with scripts/orchestrate, so refreshing its context or starting agents may "
@@ -77,9 +77,9 @@ def state() -> str:
         long_note = LONG_STATE_NOTE + "\n\n"
     saved = refreshing.STATE.read_text().strip()
     above_state = long_note + "# Your saved state (.loop/state.md)\n\n"
-    if len(above_state) + len(saved) > MAX_CHARACTERS:
+    if len(above_state) + len(saved) > files.MAX_HOOK_CHARACTERS:
         cut = "\n\n[This is the first part of .loop/state.md. Read the rest of the file.]"
-        saved = saved[: MAX_CHARACTERS - len(above_state) - len(cut)] + cut
+        saved = saved[: files.MAX_HOOK_CHARACTERS - len(above_state) - len(cut)] + cut
     return above_state + saved
 
 
@@ -103,9 +103,10 @@ def status_context(code: int, output: str, errors: str) -> str:
 
 def respond(context: str, message: str | None = None) -> None:
     """Gives the model the context, and shows the maintainer the message, if any."""
-    if len(context) > MAX_CHARACTERS:
+    if len(context) > files.MAX_HOOK_CHARACTERS:
         context = (
-            context[: MAX_CHARACTERS - 100] + "\n\n[The rest of the status was cut off. Run scripts/status to see it.]"
+            context[: files.MAX_HOOK_CHARACTERS - 100]
+            + "\n\n[The rest of the status was cut off. Run scripts/status to see it.]"
         )
     output = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}
     print(json.dumps(output | ({"systemMessage": message} if message else {})))
